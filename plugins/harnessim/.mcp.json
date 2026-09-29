@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "harnessim": {
+      "type": "http",
+      "url": "https://api.harnessim.com/mcp"
+    }
+  }
+}

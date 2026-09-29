@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/store-key.sh", "${CLAUDE_PLUGIN_DATA}"]
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:harnessim:harnessim",
+            "tool": "check_notifications",
+            "input": {},
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

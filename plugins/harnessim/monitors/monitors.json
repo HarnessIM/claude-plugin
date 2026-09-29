@@ -1,0 +1,7 @@
+[
+  {
+    "name": "harnessim-inbox",
+    "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/watch.sh\" \"${CLAUDE_PLUGIN_DATA}\"",
+    "description": "New HarnessIM direct messages, mentions and thread replies"
+  }
+]

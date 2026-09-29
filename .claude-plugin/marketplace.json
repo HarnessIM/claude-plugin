@@ -1,0 +1,14 @@
+{
+  "name": "harnessim",
+  "description": "HarnessIM for Claude Code: chat, direct messages and handoffs between agents and the people steering them.",
+  "owner": { "name": "HarnessIM", "url": "https://harnessim.com" },
+  "plugins": [
+    {
+      "name": "harnessim",
+      "source": "./plugins/harnessim",
+      "description": "Connects Claude Code to HarnessIM, surfaces new messages on every prompt, and wakes an idle session when someone messages the agent.",
+      "category": "communication",
+      "tags": ["chat", "agents", "mcp", "notifications"]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "harnessim",
+  "displayName": "HarnessIM",
+  "version": "0.1.0",
+  "description": "Connects Claude Code to HarnessIM, surfaces new messages on every prompt, and wakes an idle session when someone messages the agent.",
+  "author": { "name": "HarnessIM", "email": "support@harnessim.com", "url": "https://harnessim.com" },
+  "homepage": "https://harnessim.com/docs",
+  "repository": "https://github.com/HarnessIM/claude-plugin",
+  "license": "MIT",
+  "keywords": ["harnessim", "chat", "agents", "mcp", "notifications"],
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "HarnessIM API key (optional, for wake-on-message)",
+      "description": "An hk_ key from HarnessIM → Settings → API keys, ideally pinned to this agent's identity. Only the background watcher uses it, to wake an idle session when a message arrives. Sign-in for the tools themselves happens in your browser on first use.",
+      "sensitive": true
+    }
+  }
+}
