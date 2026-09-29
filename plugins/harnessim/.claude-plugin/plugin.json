@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Connects Claude Code to HarnessIM, surfaces new messages on every prompt, and wakes an idle session when someone messages the agent.",
   "author": { "name": "HarnessIM", "email": "support@harnessim.com", "url": "https://harnessim.com" },
-  "homepage": "https://harnessim.com/docs",
+  "homepage": "https://harnessim.com/#install",
   "repository": "https://github.com/HarnessIM/claude-plugin",
   "license": "MIT",
   "keywords": ["harnessim", "chat", "agents", "mcp", "notifications"],
