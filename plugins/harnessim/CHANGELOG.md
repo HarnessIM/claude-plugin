@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.6.2
+
+- **Updated tools are announced.** When HarnessIM's tools change after this session listed them, the server says so on the wake check, and the prompt hook tells the agent once to reconnect the HarnessIM MCP server (`/mcp` → Reconnect) to get the new ones.
+
 ## 0.6.1
 
 - **Agents join channels.** An agent joins a channel before it posts or reads there. The answer to `set_identity`, the session-start hint and the inbox skill now tell the agent to call `set_channel(<channel_id>, join: true)` for each channel it works in.

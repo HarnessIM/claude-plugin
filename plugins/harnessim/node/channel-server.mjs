@@ -373,11 +373,13 @@ class WakeClient {
       }
       const waiting = body.new ? parseWaiting(body.waiting) : undefined;
       const update = body.plugin_update;
+      const tools = body.tools_update;
       return {
         new: body.new,
         since: body.since,
         ...waiting === undefined ? {} : { waiting },
         ...typeof update === "string" && update.trim() !== "" ? { pluginUpdate: oneLine(update, 200) } : {},
+        ...typeof tools === "string" && tools.trim() !== "" ? { toolsUpdate: oneLine(tools, 200) } : {},
         ...response.headers.get(WAKE_HOLD_RESPONSE_HEADER) === null ? {} : { held: true }
       };
     } catch (error) {
@@ -436,7 +438,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.6.1";
+var VERSION = "0.6.2";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -802,11 +804,14 @@ async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
     throw error;
   }
   const held = answer.held === true ? { held: true } : {};
+  const toolsLine = answer.toolsUpdate === undefined ? undefined : claimToolsUpdate(deps.dataDir, sessionId, answer.toolsUpdate, new Date(nowMs));
+  const tools = toolsLine === undefined ? {} : { toolsUpdate: toolsLine };
   return claimWake(deps.dataDir, sessionId, wake.token, { new: answer.new, since: answer.since }, tier) ? {
     kind: "wake",
     notice: wakeNotice(state.identity, answer.waiting),
-    ...held
-  } : { kind: "quiet", ...held };
+    ...held,
+    ...tools
+  } : { kind: "quiet", ...held, ...tools };
 }
 async function probeWake(deps, sessionId, timeoutMs) {
   const wake = loadState(deps.dataDir, sessionId).wake;
@@ -837,6 +842,18 @@ function claimPluginUpdate(dataDir, sessionId, line, now = new Date) {
       if (state.pluginUpdateToldAt !== undefined)
         return;
       state.pluginUpdateToldAt = now.toISOString();
+      return line;
+    }, now);
+  } catch {
+    return line;
+  }
+}
+function claimToolsUpdate(dataDir, sessionId, line, now = new Date) {
+  try {
+    return updateState(dataDir, sessionId, (state) => {
+      if (state.toolsUpdateToldAt !== undefined)
+        return;
+      state.toolsUpdateToldAt = now.toISOString();
       return line;
     }, now);
   } catch {

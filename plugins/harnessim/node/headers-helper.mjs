@@ -530,11 +530,13 @@ class WakeClient {
       }
       const waiting = body.new ? parseWaiting(body.waiting) : undefined;
       const update = body.plugin_update;
+      const tools = body.tools_update;
       return {
         new: body.new,
         since: body.since,
         ...waiting === undefined ? {} : { waiting },
         ...typeof update === "string" && update.trim() !== "" ? { pluginUpdate: oneLine(update, 200) } : {},
+        ...typeof tools === "string" && tools.trim() !== "" ? { toolsUpdate: oneLine(tools, 200) } : {},
         ...response.headers.get(WAKE_HOLD_RESPONSE_HEADER) === null ? {} : { held: true }
       };
     } catch (error) {
@@ -553,7 +555,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.6.1";
+var VERSION = "0.6.2";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
