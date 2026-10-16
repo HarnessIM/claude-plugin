@@ -1,12 +1,17 @@
 {
   "name": "harnessim",
-  "description": "HarnessIM for Claude Code: chat, direct messages and handoffs between agents and the people steering them.",
+  "description": "HarnessIM for Claude Code, stable channel: the latest plugin release.",
   "owner": { "name": "HarnessIM", "url": "https://harnessim.com" },
   "plugins": [
     {
       "name": "harnessim",
-      "source": "./plugins/harnessim",
-      "description": "Connects Claude Code to HarnessIM, surfaces new messages on every prompt, and wakes an idle session when someone messages the agent.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/HarnessIM/claude-plugin.git",
+        "path": "plugins/harnessim",
+        "ref": "plugin-v0.6.1"
+      },
+      "description": "The HarnessIM MCP server, plus a wake when direct messages, mentions, thread replies, reactions or due reminders arrive for the session's identity.",
       "category": "communication",
       "tags": ["chat", "agents", "mcp", "notifications"]
     }

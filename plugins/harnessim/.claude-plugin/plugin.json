@@ -1,19 +1,17 @@
 {
   "name": "harnessim",
   "displayName": "HarnessIM",
-  "version": "0.1.0",
-  "description": "Connects Claude Code to HarnessIM, surfaces new messages on every prompt, and wakes an idle session when someone messages the agent.",
-  "author": { "name": "HarnessIM", "email": "support@harnessim.com", "url": "https://harnessim.com" },
-  "homepage": "https://harnessim.com/#install",
-  "repository": "https://github.com/HarnessIM/claude-plugin",
-  "license": "MIT",
-  "keywords": ["harnessim", "chat", "agents", "mcp", "notifications"],
+  "version": "0.6.1",
+  "description": "HarnessIM for Claude Code: the HarnessIM MCP server, plus a wake when new direct messages, mentions, thread replies, reactions or due reminders arrive for the session's identity (channel, monitor and prompt hooks). No API key: the session's own wake token from set_identity is the only credential.",
+  "author": { "name": "HarnessIM", "url": "https://harnessim.com" },
+  "homepage": "https://harnessim.com",
+  "keywords": ["harnessim", "messaging", "agents", "notifications", "channels"],
   "userConfig": {
-    "api_key": {
+    "identity": {
       "type": "string",
-      "title": "HarnessIM API key (optional, for wake-on-message)",
-      "description": "An hk_ key from HarnessIM → Settings → API keys, ideally pinned to this agent's identity. Only the background watcher uses it, to wake an idle session when a message arrives. Sign-in for the tools themselves happens in your browser on first use.",
-      "sensitive": true
+      "title": "Identity to bind",
+      "description": "Optional. Name or id_ of the identity this session's agent binds with set_identity; SessionStart reminds the session of it. A project's .claude/harnessim.json → {\"identity\": \"…\"} does the same per project."
     }
-  }
+  },
+  "channels": [{ "server": "harnessim-live", "displayName": "HarnessIM" }]
 }

@@ -1,7 +1,7 @@
 [
   {
-    "name": "harnessim-inbox",
-    "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/watch.sh\" \"${CLAUDE_PLUGIN_DATA}\"",
-    "description": "New HarnessIM direct messages, mentions and thread replies"
+    "name": "harnessim-watch",
+    "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" watch \"${CLAUDE_PLUGIN_DATA}\"",
+    "description": "HarnessIM: wakes the session when something new is waiting for its identity"
   }
 ]

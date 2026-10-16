@@ -2,11 +2,13 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
             "command": "sh",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/store-key.sh", "${CLAUDE_PLUGIN_DATA}"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "session-start"],
+            "timeout": 8
           }
         ]
       }
@@ -15,11 +17,36 @@
       {
         "hooks": [
           {
-            "type": "mcp_tool",
-            "server": "plugin:harnessim:harnessim",
-            "tool": "check_notifications",
-            "input": {},
-            "timeout": 15
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "prompt-submit"],
+            "timeout": 4
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__(harnessim|plugin_harnessim_harnessim)__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "post-tool"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "^mcp__(harnessim|plugin_harnessim_harnessim)__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "post-tool"],
+            "timeout": 5
           }
         ]
       }
