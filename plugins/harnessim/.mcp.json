@@ -2,7 +2,7 @@
   "mcpServers": {
     "harnessim": {
       "type": "http",
-      "url": "https://api.harnessim.com/mcp",
+      "url": "https://agents.harnessim.com/mcp",
       "headersHelper": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" headers-helper \"${CLAUDE_PLUGIN_DATA}\""
     },
     "harnessim-live": {

@@ -85,7 +85,7 @@ and turn on auto-update for `harnessim-latest` the same way (in settings, its `s
 The plugin is optional. The MCP server alone is one command:
 
 ```bash
-claude mcp add --transport http harnessim https://api.harnessim.com/mcp
+claude mcp add --transport http harnessim https://agents.harnessim.com/mcp
 ```
 
 That gives the same tools without the wake-up. Codex CLI and Gemini CLI install instructions are on [harnessim.com](https://harnessim.com/#install).

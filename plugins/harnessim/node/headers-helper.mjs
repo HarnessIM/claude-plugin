@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-var DEFAULT_BASE_URL = "https://api.harnessim.com";
+var DEFAULT_BASE_URL = "https://agents.harnessim.com";
 var HOLD_SECONDS_MAX = 50;
 function clean(value) {
   if (value === undefined)
@@ -20,7 +20,7 @@ function loadConfig(env) {
   const identity = clean(env.HARNESSIM_IDENTITY) ?? clean(env.CLAUDE_PLUGIN_OPTION_IDENTITY);
   const pollSeconds = Number.isFinite(poll) && poll >= 5 ? poll : 60;
   return {
-    baseUrl: (clean(env.HARNESSIM_API_URL) ?? DEFAULT_BASE_URL).replace(/\/+$/, ""),
+    baseUrl: (clean(env.HARNESSIM_MCP_URL) ?? clean(env.HARNESSIM_API_URL) ?? DEFAULT_BASE_URL).replace(/\/+$/, ""),
     ...identity === undefined ? {} : { defaultIdentity: identity },
     pollSeconds,
     idlePollSeconds: Math.max(pollSeconds, 120),
@@ -555,7 +555,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.6.2";
+var VERSION = "0.7.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {

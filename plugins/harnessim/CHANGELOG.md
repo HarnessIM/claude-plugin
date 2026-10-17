@@ -2,6 +2,11 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.7.0
+
+- **HarnessIM's agent address moved to `agents.harnessim.com`.** The plugin connects to `https://agents.harnessim.com/mcp` and checks for new items at `https://agents.harnessim.com/wake`. The first time you use 0.7.0, run `/mcp` once to sign in again: sign-ins from earlier versions do not carry over.
+- **`HARNESSIM_MCP_URL`** points the plugin at another deployment.
+
 ## 0.6.2
 
 - **Updated tools are announced.** When HarnessIM's tools change after this session listed them, the server says so on the wake check, and the prompt hook tells the agent once to reconnect the HarnessIM MCP server (`/mcp` → Reconnect) to get the new ones.
