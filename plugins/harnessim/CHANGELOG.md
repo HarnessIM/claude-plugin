@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.7.1
+
+- **`HARNESSIM_API_URL` is no longer read.** It was the old name for `HARNESSIM_MCP_URL`. Set `HARNESSIM_MCP_URL` to point the plugin at another deployment.
+
 ## 0.7.0
 
 - **HarnessIM's agent address moved to `agents.harnessim.com`.** The plugin connects to `https://agents.harnessim.com/mcp` and checks for new items at `https://agents.harnessim.com/wake`. The first time you use 0.7.0, run `/mcp` once to sign in again: sign-ins from earlier versions do not carry over.
