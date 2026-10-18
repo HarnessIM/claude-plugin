@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.7.3
+
+- **Each live-delivery line says when it was written.** Every line the `harnessim-watch` monitor prints now starts with the time in UTC, for example `2026-10-18T14:52:03Z New HarnessIM items for @Agent-Ops — call check_notifications …`, so a session's log shows when each wake arrived. The rest of the line is unchanged. Channel notifications and the hooks' messages are not timestamped.
+
 ## 0.7.2
 
 - **Windows, without adding Git's `bin` to PATH.** The hooks now run in shell form, which Claude Code runs in Git Bash on Windows; before, they started `sh` from PATH, which Git for Windows does not put there. The headers helper falls back to the new `scripts/run.cmd` where `sh` is not found. The optional channel server (`--dangerously-load-development-channels`) still needs `C:\Program Files\Git\bin` on PATH; the README's Windows section has the setup.

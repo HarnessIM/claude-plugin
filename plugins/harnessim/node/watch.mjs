@@ -327,7 +327,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.7.2";
+var VERSION = "0.7.3";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -1102,6 +1102,21 @@ async function runHook(fn) {
   process.exit(0);
 }
 
+function isoSecond(nowMs) {
+  return new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function stampLine(text, nowMs) {
+  return `${isoSecond(nowMs)} ${text}`;
+}
+function monitorWriters(write, now = Date.now) {
+  return {
+    deliver: (notice) => write(`${stampLine(notice.text, now())}
+`),
+    report: (line) => write(`${stampLine(line, now())}
+`)
+  };
+}
+
 var deps = depsFromProcess();
 var controller = new AbortController;
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"])
@@ -1126,18 +1141,15 @@ if (deps.env.HARNESSIM_DEBUG_LOG) {
 `);
   } catch {}
 }
+var writers = monitorWriters((chunk) => process.stdout.write(chunk), () => deps.now?.() ?? Date.now());
 var result = await runLoop({
   ...deps,
   tier: "monitor",
   chain,
   sleep: abortableSleep,
   signal: controller.signal,
-  deliver: (notice) => {
-    process.stdout.write(`${notice.text}
-`);
-  },
-  report: (line) => process.stdout.write(`${line}
-`),
+  deliver: writers.deliver,
+  report: writers.report,
   suppressed: (sessionId) => channelActive(deps.dataDir, sessionId, Date.now(), pidAlive),
   ...once ? { maxTicks: 1, sleep: async () => {
     return;
