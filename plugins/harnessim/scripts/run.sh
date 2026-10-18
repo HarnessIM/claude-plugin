@@ -1,9 +1,12 @@
 #!/bin/sh
 # run.sh <entry> [args...] — start one of the plugin's entrypoints.
 #
-# Runs the prebuilt JavaScript in node/ with Bun or Node; with neither,
-# exit 0 silently so the hook or monitor is simply skipped (the headers
-# helper prints `{}`). Never prints anything else of its own.
+# Bun runs the TypeScript source; without Bun, Node runs the prebuilt
+# JavaScript in node/; with neither, exit 0 so the hook or monitor is
+# simply skipped (the headers helper prints `{}`), after one line on stderr
+# saying why (0.7.2). Prints nothing else of its own. Kept as the entry
+# point older installed copies of the plugin call; scripts/run.cmd is the
+# same for Windows cmd.exe.
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 name=$1
 shift
@@ -18,6 +21,10 @@ elif command -v node >/dev/null 2>&1; then runtime=node
 else
   # headersHelper must still answer JSON, or the MCP connection fails.
   [ "$name" = headers-helper ] && echo '{}'
+  echo "HarnessIM plugin: neither bun nor node is on PATH, so $name did not run. Install Node.js or Bun." >&2
   exit 0
 fi
-exec "$runtime" "$root/node/$name.mjs" "$@"
+case "$runtime" in
+  *node) exec "$runtime" "$root/node/$name.mjs" "$@" ;;
+  *) exec "$runtime" "$root/src/bin/$name.ts" "$@" ;;
+esac

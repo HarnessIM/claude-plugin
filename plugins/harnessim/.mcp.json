@@ -3,7 +3,7 @@
     "harnessim": {
       "type": "http",
       "url": "https://agents.harnessim.com/mcp",
-      "headersHelper": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" headers-helper \"${CLAUDE_PLUGIN_DATA}\""
+      "headersHelper": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" headers-helper \"${CLAUDE_PLUGIN_DATA}\" || \"${CLAUDE_PLUGIN_ROOT}/scripts/run.cmd\" headers-helper \"${CLAUDE_PLUGIN_DATA}\""
     },
     "harnessim-live": {
       "command": "sh",

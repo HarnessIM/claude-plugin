@@ -2,6 +2,11 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.7.2
+
+- **Windows, without adding Git's `bin` to PATH.** The hooks now run in shell form, which Claude Code runs in Git Bash on Windows; before, they started `sh` from PATH, which Git for Windows does not put there. The headers helper falls back to the new `scripts/run.cmd` where `sh` is not found. The optional channel server (`--dangerously-load-development-channels`) still needs `C:\Program Files\Git\bin` on PATH; the README's Windows section has the setup.
+- **A missing runtime says so.** With neither Bun nor Node, each part prints one line on stderr instead of nothing.
+
 ## 0.7.1
 
 - **`HARNESSIM_API_URL` is no longer read.** It was the old name for `HARNESSIM_MCP_URL`. Set `HARNESSIM_MCP_URL` to point the plugin at another deployment.

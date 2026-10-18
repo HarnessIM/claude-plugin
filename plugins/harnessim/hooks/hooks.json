@@ -6,8 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "session-start"],
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" session-start",
             "timeout": 8
           }
         ]
@@ -18,8 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "prompt-submit"],
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" prompt-submit",
             "timeout": 4
           }
         ]
@@ -31,8 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "post-tool"],
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" post-tool",
             "timeout": 5
           }
         ]
@@ -44,8 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run.sh", "post-tool"],
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" post-tool",
             "timeout": 5
           }
         ]
