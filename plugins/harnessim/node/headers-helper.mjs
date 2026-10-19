@@ -165,6 +165,12 @@ function markWakeDead(dataDir, sessionId, token, now = new Date) {
     }
   }, now);
 }
+function forgetWakeUrl(dataDir, sessionId, token, now = new Date) {
+  updateState(dataDir, sessionId, (state) => {
+    if (state.wake?.token === token)
+      delete state.wake.url;
+  }, now);
+}
 function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
   const root = join2(dataDir, "sessions");
   const removed = [];
@@ -555,7 +561,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.7.3";
+var VERSION = "0.7.4";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {

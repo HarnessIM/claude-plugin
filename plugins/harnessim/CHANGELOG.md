@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.7.4
+
+- **Live delivery follows HarnessIM to its current address.** A session bound before `api.harnessim.com` was retired kept asking that host for new items, got "not found" every half minute for as long as it ran, and never said live delivery had stopped. A "not found" from a stored address now switches to the configured one (`agents.harnessim.com`, or `HARNESSIM_MCP_URL`) and keeps it; a "not found" there is treated like a refused token, so the session is told once to call `set_identity`.
+
 ## 0.7.3
 
 - **Each live-delivery line says when it was written.** Every line the `harnessim-watch` monitor prints now starts with the time in UTC, for example `2026-10-18T14:52:03Z New HarnessIM items for @Agent-Ops — call check_notifications …`, so a session's log shows when each wake arrived. The rest of the line is unchanged. Channel notifications and the hooks' messages are not timestamped.

@@ -327,7 +327,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.7.3";
+var VERSION = "0.7.4";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -478,6 +478,12 @@ function markWakeDead(dataDir, sessionId, token, now = new Date) {
       state.wake.dead = true;
       state.wake.deadAt = now.toISOString();
     }
+  }, now);
+}
+function forgetWakeUrl(dataDir, sessionId, token, now = new Date) {
+  updateState(dataDir, sessionId, (state) => {
+    if (state.wake?.token === token)
+      delete state.wake.url;
   }, now);
 }
 function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
@@ -662,6 +668,21 @@ function identityLostStatus(state, probe) {
   };
 }
 
+function isRefusal(error) {
+  return error instanceof HttpError && (error.status === 401 || error.status === 403 || error.status === 404);
+}
+async function askWake(deps, sessionId, wake, nowMs, ask) {
+  const configured = `${loadDepsConfig(deps).baseUrl}/wake`;
+  const url = wake.url ?? configured;
+  try {
+    return await ask(url);
+  } catch (error) {
+    if (!(error instanceof HttpError && error.status === 404) || url === configured)
+      throw error;
+    forgetWakeUrl(deps.dataDir, sessionId, wake.token, new Date(nowMs));
+    return ask(configured);
+  }
+}
 function lostOrDead(deps, sessionId, nowMs) {
   const text = claimIdentityLost(deps.dataDir, sessionId, "wake_refused", {
     now: new Date(nowMs)
@@ -679,12 +700,11 @@ async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
     if (!(nowMs - deadMs <= REVIVE_WINDOW_MS))
       return lostOrDead(deps, sessionId, nowMs);
   }
-  const url = wake.url ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   let answer;
   try {
-    answer = await wakeClient(deps).check(url, wake.token, wake.since, timeoutMs, signal, wait);
+    answer = await askWake(deps, sessionId, wake, nowMs, (url) => wakeClient(deps).check(url, wake.token, wake.since, timeoutMs, signal, wait));
   } catch (error) {
-    if (error instanceof HttpError && (error.status === 401 || error.status === 403)) {
+    if (isRefusal(error)) {
       if (wake.dead)
         return lostOrDead(deps, sessionId, nowMs);
       markWakeDead(deps.dataDir, sessionId, wake.token, new Date(nowMs));
@@ -706,17 +726,17 @@ async function probeWake(deps, sessionId, timeoutMs) {
   const wake = loadState(deps.dataDir, sessionId).wake;
   if (!wake)
     return { wakeToken: "none (call set_identity)" };
-  const url = wake.url ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+  const nowMs = deps.now?.() ?? Date.now();
   try {
-    const answer = await wakeClient(deps).check(url, wake.token, wake.since, timeoutMs);
-    const now = new Date(deps.now?.() ?? Date.now());
+    const answer = await askWake(deps, sessionId, wake, nowMs, (url) => wakeClient(deps).check(url, wake.token, wake.since, timeoutMs));
+    const now = new Date(nowMs);
     const pluginUpdate = answer.pluginUpdate === undefined ? undefined : claimPluginUpdate(deps.dataDir, sessionId, answer.pluginUpdate, now);
     return {
       wakeToken: `active (confirmed ${now.toISOString()})`,
       ...pluginUpdate === undefined ? {} : { pluginUpdate }
     };
   } catch (error) {
-    if (error instanceof HttpError && (error.status === 401 || error.status === 403)) {
+    if (isRefusal(error)) {
       return {
         wakeToken: "refused by server — this session's identity was lost (its MCP session ended or reconnected); call set_identity"
       };
