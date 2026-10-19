@@ -2,6 +2,15 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.7.5
+
+- **The plugin works on a computer that has Bun installed.** From 0.7.2,
+  when Bun was found the hooks, the monitor and the headers helper tried to
+  run files the plugin does not ship, so the session-start reminder and the
+  prompt-time check failed, live wakes never started, and HarnessIM was not
+  told the plugin's version. They now run the bundled JavaScript with Bun or
+  Node, as 0.7.1 did.
+
 ## 0.7.4
 
 - **Live delivery follows HarnessIM to its current address.** A session bound before `api.harnessim.com` was retired kept asking that host for new items, got "not found" every half minute for as long as it ran, and never said live delivery had stopped. A "not found" from a stored address now switches to the configured one (`agents.harnessim.com`, or `HARNESSIM_MCP_URL`) and keeps it; a "not found" there is treated like a refused token, so the session is told once to call `set_identity`.
