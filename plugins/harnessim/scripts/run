@@ -1,0 +1,10 @@
+#!/bin/sh
+# run <entry> [args...] - the exec-form launcher (0.7.8). Claude Code starts
+# a stdio MCP server with no shell around it, so a config naming `sh`
+# fails wherever `sh` is not on PATH (Windows). The config names this file
+# instead, with no extension:
+# - on macOS and Linux the kernel runs it through /bin/sh (the line above),
+#   which needs nothing on PATH, and it hands over to run.sh;
+# - on Windows Claude Code resolves a command with no extension through
+#   PATHEXT, so the same name finds run.cmd beside it.
+exec /bin/sh "${0%/*}/run.sh" "$@"

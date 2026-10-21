@@ -327,7 +327,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.7.5";
+var VERSION = "0.8.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -1105,6 +1105,7 @@ function depsFromProcess(argv = process.argv.slice(2), cwd) {
   const env = process.env;
   return {
     env,
+    home: homedir(),
     dataDir: resolveDataDir(env, argv, homedir()),
     cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd()
   };

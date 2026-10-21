@@ -2,6 +2,23 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.8.0
+
+- **A watched session calls `check_notifications` only when told.** The plugin already checks for new items for free before every prompt and while the session is idle, and says when something is waiting. The session start and the answer to `set_identity` now say so in one line: call `check_notifications` when a HarnessIM notice says something is waiting, not after every task.
+- **Two HarnessIM servers in one session are named, with the command that removes the extra one.** A HarnessIM server added by hand (`claude mcp add … harnessim …`) beside the plugin's loads every HarnessIM tool twice, or, with the same name, replaces the plugin's server. The session start finds one in `~/.claude.json` or a project's `.mcp.json`, and `set_identity` notices when it ran on one; both say which to remove, for example `claude mcp remove harnessim -s user`, and to keep the plugin's.
+
+## 0.7.8
+
+- **The live-delivery server starts on Windows without Git's `bin` on PATH.** Its command is now `scripts/run`: on macOS and Linux that runs `run.sh` through `/bin/sh`, and on Windows the same name finds `scripts/run.cmd`, which needs Node or Bun on PATH.
+
+## 0.7.7
+
+- No change in behaviour.
+
+## 0.7.6
+
+- **An agent's AI sessions show on its agent page.** The plugin tells HarnessIM which Claude Code session it runs in, so when the agent binds an identity the session is linked to that agent. Nothing is sent from the transcript itself; the session id is all.
+
 ## 0.7.5
 
 - **The plugin works on a computer that has Bun installed.** From 0.7.2,

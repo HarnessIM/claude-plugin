@@ -561,7 +561,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.7.5";
+var VERSION = "0.8.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -594,18 +594,21 @@ async function withDeadline(ms, fallback, run) {
 }
 
 var TOKEN = /^wt_[A-Za-z0-9._-]+$/;
+var SESSION = /^[A-Za-z0-9._:-]{1,128}$/;
+var CLAUDE_SESSION_HEADER = "X-HarnessIM-Claude-Session";
 var versionOnly = JSON.stringify({ [PLUGIN_HEADER]: VERSION });
-var out = versionOnly;
+var out;
 try {
   const env = process.env;
   const dataDir = resolveDataDir(env, process.argv.slice(2), homedir());
   const session = resolveSessionId(env, dataDir, ancestors(process.ppid));
+  const headers = { [PLUGIN_HEADER]: VERSION };
+  if (session.how !== "synthetic" && SESSION.test(session.sessionId))
+    headers[CLAUDE_SESSION_HEADER] = session.sessionId;
   const token = loadState(dataDir, session.sessionId).wake?.token;
   if (typeof token === "string" && TOKEN.test(token))
-    out = JSON.stringify({
-      [PLUGIN_HEADER]: VERSION,
-      "X-HarnessIM-Wake": token
-    });
+    headers["X-HarnessIM-Wake"] = token;
+  out = JSON.stringify(headers);
 } catch {
   out = versionOnly;
 }

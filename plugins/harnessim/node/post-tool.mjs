@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { homedir } from "node:os";
+
 var DEFAULT_BACKOFF = {
   baseMs: 1000,
   maxMs: 60000,
@@ -327,7 +329,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.7.5";
+var VERSION = "0.8.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -793,19 +795,97 @@ function withUrl(grant) {
   return grant.url !== undefined && /^https?:\/\//.test(grant.url) ? grant : { token: grant.token };
 }
 
+import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
+import { dirname as dirname2, join as join4, resolve } from "node:path";
+var HARNESSIM_URL = /^https?:\/\/(?:[a-z0-9-]+\.)*harnessim\.com(?::\d+)?(?:\/|$)/i;
+function isHarnessimServer(name, entry) {
+  if (name === "harnessim")
+    return true;
+  const url = entry?.url;
+  return typeof url === "string" && HARNESSIM_URL.test(url);
+}
+function readJson2(path) {
+  try {
+    if (!existsSync3(path))
+      return;
+    return JSON.parse(readFileSync2(path, "utf8"));
+  } catch {
+    return;
+  }
+}
+function serversIn(value) {
+  const servers = value?.mcpServers;
+  if (servers === null || typeof servers !== "object")
+    return [];
+  return Object.entries(servers);
+}
+function upFrom(cwd) {
+  const dirs = [];
+  let dir = resolve(cwd);
+  for (;; ) {
+    dirs.push(dir);
+    const parent = dirname2(dir);
+    if (parent === dir)
+      return dirs;
+    dir = parent;
+  }
+}
+function claudeJsonPath(env, home) {
+  const dir = env.CLAUDE_CONFIG_DIR?.trim();
+  return join4(dir ? dir : home, ".claude.json");
+}
+function findHandAddedServers(env, home, cwd) {
+  const found = [];
+  const config = readJson2(claudeJsonPath(env, home));
+  for (const [name, entry] of serversIn(config))
+    if (isHarnessimServer(name, entry))
+      found.push({ name, scope: "user" });
+  const projects = config?.projects;
+  for (const dir of upFrom(cwd)) {
+    const project = projects !== null && typeof projects === "object" ? projects[dir] : undefined;
+    for (const [name, entry] of serversIn(project))
+      if (isHarnessimServer(name, entry))
+        found.push({ name, scope: "local", dir });
+    for (const [name, entry] of serversIn(readJson2(join4(dir, ".mcp.json"))))
+      if (isHarnessimServer(name, entry))
+        found.push({ name, scope: "project", dir });
+  }
+  return found;
+}
+function removeCommand(server) {
+  const cmd = `claude mcp remove ${server.name} -s ${server.scope}`;
+  return server.dir === undefined ? cmd : `${cmd} (in ${server.dir})`;
+}
+function handAddedNotice(found) {
+  if (found.length === 0)
+    return;
+  const which = found.map((s) => `"${s.name}" (${s.scope} scope): ${removeCommand(s)}`).join("; ");
+  return `HarnessIM plugin: a HarnessIM MCP server was also added by hand, so this session has two. ` + `Ask the user to remove it and keep the plugin's: ${which}. ` + "With both, every HarnessIM tool loads twice, or the plugin's server is dropped and the session loses its identity on a reconnect.";
+}
+var PLUGIN_TOOL = /^mcp__plugin_harnessim_/;
+function ranOnHandAddedServer(toolName) {
+  return toolName !== undefined && /^mcp__[^_].*__set_identity$/.test(toolName) && !PLUGIN_TOOL.test(toolName);
+}
+function boundOnHandAddedNotice(toolName, found) {
+  const server = /^mcp__(.+)__set_identity$/.exec(toolName)?.[1] ?? "harnessim";
+  const match = found.find((s) => s.name === server);
+  const remove = match === undefined ? `claude mcp remove ${server} (with the scope it was added in)` : removeCommand(match);
+  return `HarnessIM plugin: set_identity ran on a HarnessIM server added by hand ("${server}"), not the plugin's. ` + `Ask the user to remove it and keep the plugin's: ${remove}.`;
+}
+
 import { execFileSync } from "node:child_process";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join4 } from "node:path";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
+import { join as join5 } from "node:path";
 function pointerPath(dataDir, pid) {
-  return join4(dataDir, "by-pid", `${pid}.json`);
+  return join5(dataDir, "by-pid", `${pid}.json`);
 }
 function writePointer(dataDir, pid, sessionId, source, now = new Date) {
-  mkdirSync2(join4(dataDir, "by-pid"), { recursive: true });
+  mkdirSync2(join5(dataDir, "by-pid"), { recursive: true });
   writeJsonAtomic(pointerPath(dataDir, pid), { sessionId, at: now.toISOString(), source });
 }
 function parentPid(pid) {
   try {
-    const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
+    const stat = readFileSync3(`/proc/${pid}/stat`, "utf8");
     const after = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
     const ppid = Number(after[1]);
     return Number.isFinite(ppid) && ppid > 0 ? ppid : undefined;
@@ -861,7 +941,7 @@ function pidAlive(pid) {
 }
 function processArgv(pid) {
   try {
-    return readFileSync2(`/proc/${pid}/cmdline`, "utf8").split("\x00").filter(Boolean);
+    return readFileSync3(`/proc/${pid}/cmdline`, "utf8").split("\x00").filter(Boolean);
   } catch {
     try {
       return execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 1000 }).trim().split(/\s+/);
@@ -885,6 +965,16 @@ function checkWithin(deps, sessionId, tier, budgetMs) {
   return withDeadline(budgetMs, TIMED_OUT, (signal) => checkWake(deps, sessionId, tier, budgetMs - 200, signal));
 }
 var JOIN_STEP = "After set_identity, call set_channel(<channel_id>, join: true) for each " + "channel you work in: an agent must join a channel before it can post or " + "read there.";
+var WAKE_ONLY = "This plugin tells the session when something is waiting for its " + "identity: call check_notifications then, not after every task.";
+function handAdded(deps) {
+  return findHandAddedServers(deps.env, deps.home ?? homedir(), deps.cwd);
+}
+function withLine(text, line) {
+  if (line === undefined)
+    return text;
+  return text === "" ? line : `${text}
+${line}`;
+}
 var NOT_WATCHING = "HarnessIM plugin: live notifications start once this session calls " + "set_identity on the harnessim MCP server — its answer carries this " + "session's wake token. No API key is needed. " + JOIN_STEP;
 var REFUSED = "HarnessIM plugin: this session's wake token was refused (its MCP session " + "ended, or another set_identity replaced it). Call set_identity again to " + "resume live notifications (run /mcp first if HarnessIM tools are missing).";
 async function promptSubmit(input, deps) {
@@ -931,11 +1021,14 @@ async function postSetIdentity(input, deps) {
   }
   const who = `@${bound.name} (${bound.id})`;
   if (!grant) {
-    return output("PostToolUse", `HarnessIM plugin: the server handed back no wake token for ${who}, so live notifications are off in this session.`);
+    return output("PostToolUse", withLine(`HarnessIM plugin: the server handed back no wake token for ${who}, so live notifications are off in this session.`, handAddedLine(input.tool_name, deps)));
   }
   const first = await checkWithin(deps, sessionId, "set_identity", SET_IDENTITY_BUDGET_MS);
-  const waiting = first.kind === "wake" ? ` Something is already waiting: ${first.notice.text}. ${READ_HINT}` : "";
-  return output("PostToolUse", `HarnessIM plugin: live notifications now follow ${who} in this session. ${JOIN_STEP}${waiting}`);
+  const waiting = first.kind === "wake" ? ` Something is already waiting: ${first.notice.text}. ${READ_HINT}` : " Nothing is waiting now.";
+  return output("PostToolUse", withLine(`HarnessIM plugin: live notifications now follow ${who} in this session. ${JOIN_STEP}${waiting} ${WAKE_ONLY}`, handAddedLine(input.tool_name, deps)));
+}
+function handAddedLine(toolName, deps) {
+  return toolName !== undefined && ranOnHandAddedServer(toolName) ? boundOnHandAddedNotice(toolName, handAdded(deps)) : undefined;
 }
 var SET_IDENTITY_TOOL = /__set_identity$/;
 async function postHarnessimTool(input, deps) {
@@ -956,7 +1049,7 @@ async function postHarnessimTool(input, deps) {
   return output(input.hook_event_name ?? "PostToolUse", text);
 }
 
-import { homedir } from "node:os";
+import { homedir as homedir2 } from "node:os";
 async function readStdin(limit = 1e6) {
   if (process.stdin.isTTY)
     return "";
@@ -982,7 +1075,8 @@ function depsFromProcess(argv = process.argv.slice(2), cwd) {
   const env = process.env;
   return {
     env,
-    dataDir: resolveDataDir(env, argv, homedir()),
+    home: homedir2(),
+    dataDir: resolveDataDir(env, argv, homedir2()),
     cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd()
   };
 }

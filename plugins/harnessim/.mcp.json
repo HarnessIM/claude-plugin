@@ -6,12 +6,8 @@
       "headersHelper": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" headers-helper \"${CLAUDE_PLUGIN_DATA}\" || \"${CLAUDE_PLUGIN_ROOT}/scripts/run.cmd\" headers-helper \"${CLAUDE_PLUGIN_DATA}\""
     },
     "harnessim-live": {
-      "command": "sh",
-      "args": [
-        "${CLAUDE_PLUGIN_ROOT}/scripts/run.sh",
-        "channel-server",
-        "${CLAUDE_PLUGIN_DATA}"
-      ]
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run",
+      "args": ["channel-server", "${CLAUDE_PLUGIN_DATA}"]
     }
   }
 }
