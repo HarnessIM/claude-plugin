@@ -13,7 +13,7 @@ setlocal
 set "root=%~dp0.."
 set "name=%~1"
 set "known="
-for %%e in (session-start prompt-submit post-set-identity post-tool watch channel-server headers-helper) do if /i "%name%"=="%%e" set "known=1"
+for %%e in (session-start prompt-submit post-set-identity post-tool watch channel-server headers-helper waiting) do if /i "%name%"=="%%e" set "known=1"
 if not defined known exit /b 0
 set "runtime="
 if defined HARNESSIM_RUNTIME set "runtime=%HARNESSIM_RUNTIME%"

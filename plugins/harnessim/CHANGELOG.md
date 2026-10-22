@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.9.0
+
+- **A session waiting at a permission prompt says so.** When Claude Code stops to ask for permission and nobody answers within a minute, HarnessIM sets the agent's status to "Waiting for you: <command>", sends its owner one direct message (so the bell and phone push fire), and shows the wait in Settings → Sessions. It clears, and the old status comes back, as soon as the prompt is answered. The plugin never answers the prompt itself. The command is shown on one line, at most 80 characters, with env values, tokens, passwords and header values replaced by `…`. `HARNESSIM_WAITING_GRACE_S` changes the one-minute wait (0–3600 seconds).
+
 ## 0.8.0
 
 - **A watched session calls `check_notifications` only when told.** The plugin already checks for new items for free before every prompt and while the session is idle, and says when something is waiting. The session start and the answer to `set_identity` now say so in one line: call `check_notifications` when a HarnessIM notice says something is waiting, not after every task.

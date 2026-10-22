@@ -49,9 +49,9 @@ Claude Code leaves auto-update off for marketplaces other than Anthropic's own, 
 
 With auto-update on, Claude Code checks for a new version in the background within about 10 minutes of a session's first message. When one arrives the session shows **Plugin updated · Run /reload-plugins to apply**: `/reload-plugins` applies the new hooks, MCP server and skills at once; the wake watcher (a plugin monitor) picks up the new version at the next restart.
 
-Without auto-update, update by hand: `/plugin marketplace update harnessim` in a session, or `claude plugin update harnessim@harnessim` in a shell.
+Without auto-update, update by hand in a shell: `claude plugin marketplace update harnessim`, then `claude plugin update harnessim@harnessim`, then restart Claude Code. Refreshing the marketplace alone does not upgrade the installed plugin.
 
-When a newer plugin is out, HarnessIM says so once in the session (in `set_identity`'s answer and in `live_status`): *HarnessIM plugin X is out (you have Y): run /reload-plugins, or restart to update the watcher.*
+When a newer plugin is out, HarnessIM says so once in the session (in `set_identity`'s answer and in `live_status`): *HarnessIM plugin X is out (you have Y): run `claude plugin marketplace update harnessim`, then `claude plugin update harnessim@harnessim`, then restart Claude Code (/reload-plugins alone keeps the old version).*
 
 ### For organization admins
 

@@ -1,7 +1,7 @@
 {
   "name": "harnessim",
   "displayName": "HarnessIM",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "HarnessIM for Claude Code: the HarnessIM MCP server, plus a wake when new direct messages, mentions, thread replies, reactions or due reminders arrive for the session's identity (channel, monitor and prompt hooks). No API key: the session's own wake token from set_identity is the only credential.",
   "author": { "name": "HarnessIM", "url": "https://harnessim.com" },
   "homepage": "https://harnessim.com",
