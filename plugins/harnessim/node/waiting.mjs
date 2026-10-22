@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync as rmSync2 } from "node:fs";
-import { join as join3 } from "node:path";
+import { isAbsolute, join as join3, relative, resolve, sep } from "node:path";
 
 var DEFAULT_BACKOFF = {
   baseMs: 1000,
@@ -326,7 +326,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.9.0";
+var VERSION = "0.10.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -520,6 +520,11 @@ var SUMMARY_MAX2 = 80;
 var WAITING_GRACE_S = 60;
 var CLEAR_BUDGET_MS = 800;
 var NOTICE_BUDGET_MS = 5000;
+var ANSWER_WAIT_S = 570;
+var DECISION_POLL_MS = 3000;
+var LOCAL_POLL_MS = 1000;
+var DECISION_BUDGET_MS = 5000;
+var MIN_ANSWER_S = 15;
 var waitingDir = (dataDir) => join3(dataDir, "waiting");
 var waitingPath = (dataDir, sessionId) => join3(waitingDir(dataDir), `${sanitizeId(sessionId)}.json`);
 function redact(text) {
@@ -549,6 +554,14 @@ function summarize(toolName, toolInput) {
   }
   return clip(detail === undefined ? tool : `${tool}: ${redact(detail)}`);
 }
+function writesOutside(toolInput, cwd) {
+  const input = toolInput && typeof toolInput === "object" ? toolInput : {};
+  const path = str(input["file_path"]) ?? str(input["notebook_path"]);
+  if (path === undefined)
+    return false;
+  const rel = relative(resolve(cwd), resolve(cwd, path));
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
 function readWaiting(dataDir, sessionId) {
   return readJson(waitingPath(dataDir, sessionId));
 }
@@ -577,14 +590,59 @@ function waitingRequest(deps, wake, body) {
   };
 }
 async function send(deps, sessionId, body, budgetMs) {
+  return await sendFor(deps, sessionId, body, budgetMs) !== undefined;
+}
+async function sendFor(deps, sessionId, body, budgetMs) {
   const wake = loadState(deps.dataDir, sessionId).wake;
   if (!wake || wake.dead)
-    return false;
+    return;
   const { url, init } = waitingRequest(deps, wake, body);
   const fetchImpl = deps.fetch ?? ((input, i) => fetch(input, i));
-  return withDeadline(budgetMs, false, async (signal) => {
+  return withDeadline(budgetMs, undefined, async (signal) => {
     const response = await fetchImpl(url, { ...init, signal });
-    return response.ok;
+    if (!response.ok)
+      return;
+    const answer = await response.json().catch(() => ({}));
+    return answer !== null && typeof answer === "object" ? answer : {};
+  });
+}
+function decisionUrl(deps, wakeUrl2, request) {
+  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+  return `${base.replace(/\/+$/, "")}/decision?request=${encodeURIComponent(request)}`;
+}
+async function readDecision(deps, sessionId, request) {
+  const wake = loadState(deps.dataDir, sessionId).wake;
+  if (!wake || wake.dead)
+    return "gone";
+  const fetchImpl = deps.fetch ?? ((input, i) => fetch(input, i));
+  return withDeadline(DECISION_BUDGET_MS, undefined, async (signal) => {
+    const response = await fetchImpl(decisionUrl(deps, wake.url, request), {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${wake.token}`,
+        accept: "application/json",
+        "user-agent": `harnessim-claude-code-plugin/${VERSION}`,
+        [PLUGIN_HEADER]: VERSION
+      },
+      signal
+    });
+    if (response.status === 401)
+      return "gone";
+    if (!response.ok)
+      return;
+    const body = await response.json().catch(() => ({}));
+    return body.state === "pending" || body.state === "allow" || body.state === "deny" || body.state === "gone" ? body.state : undefined;
+  });
+}
+function decisionOutput(decision) {
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: decision === "allow" ? { behavior: "allow" } : {
+        behavior: "deny",
+        message: "Your person denied this from HarnessIM. Do not retry it; ask them what to do instead."
+      }
+    }
   });
 }
 var bound = (deps, sessionId) => {
@@ -592,20 +650,63 @@ var bound = (deps, sessionId) => {
   return wake !== undefined && wake.dead !== true;
 };
 var nowIso = (deps) => new Date(deps.now?.() ?? Date.now()).toISOString();
-function permissionRequest(input, deps) {
+var realSleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+function answerWaitSeconds(deps) {
+  const raw = deps.env.HARNESSIM_ANSWER_WAIT_S;
+  if (raw === undefined || raw.trim() === "")
+    return ANSWER_WAIT_S;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 590 ? value : ANSWER_WAIT_S;
+}
+async function permissionRequest(input, deps, sleep = realSleep) {
   const sessionId = input.session_id;
   if (!sessionId || !bound(deps, sessionId))
     return "";
   const summary = summarize(input.tool_name, input.tool_input);
+  const tool = str(input.tool_name);
+  const budgetMs = answerWaitSeconds(deps) * 1000;
+  const id = randomUUID();
+  const start = deps.now?.() ?? Date.now();
   writeWaiting(deps.dataDir, sessionId, {
-    id: randomUUID(),
+    id,
     kind: "permission",
     ...summary === undefined ? {} : { summary },
-    at: nowIso(deps)
+    at: nowIso(deps),
+    ...tool === undefined || budgetMs === 0 ? {} : {
+      tool: tool.slice(0, 64),
+      outside: writesOutside(input.tool_input, deps.cwd),
+      until: start + budgetMs
+    }
   });
+  if (tool === undefined || budgetMs === 0)
+    return "";
+  return awaitAnswer(deps, sessionId, id, budgetMs, sleep);
+}
+async function awaitAnswer(deps, sessionId, id, budgetMs, sleep) {
+  let waited = 0;
+  while (waited < budgetMs) {
+    const file = readWaiting(deps.dataDir, sessionId);
+    if (file === undefined || file.id !== id)
+      return "";
+    if (file.told === true && file.answers !== true)
+      return "";
+    if (file.told !== true) {
+      await sleep(LOCAL_POLL_MS);
+      waited += LOCAL_POLL_MS;
+      continue;
+    }
+    const state = await readDecision(deps, sessionId, id);
+    if (state === "gone")
+      return "";
+    if (state === "allow" || state === "deny") {
+      await clearWaiting({ session_id: sessionId }, deps);
+      return decisionOutput(state);
+    }
+    await sleep(DECISION_POLL_MS);
+    waited += DECISION_POLL_MS;
+  }
   return "";
 }
-var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function graceSeconds(deps) {
   const raw = Number(deps.env.HARNESSIM_WAITING_GRACE_S);
   return Number.isFinite(raw) && raw >= 0 && raw <= 3600 ? raw : WAITING_GRACE_S;
@@ -636,19 +737,39 @@ async function notification(input, deps, sleep = realSleep) {
   const still = readWaiting(deps.dataDir, sessionId);
   if (still === undefined || still.id !== id || still.told)
     return "";
-  const ok = await send(deps, sessionId, {
+  const request = requestOf(still, deps.now?.() ?? Date.now());
+  const answer = await sendFor(deps, sessionId, {
     waiting: true,
     kind,
-    ...still.summary === undefined ? {} : { summary: still.summary }
+    ...still.summary === undefined ? {} : { summary: still.summary },
+    ...request === undefined ? {} : { request }
   }, NOTICE_BUDGET_MS);
-  if (!ok)
+  if (answer === undefined)
     return "";
   const now = readWaiting(deps.dataDir, sessionId);
   if (now?.id === id)
-    writeWaiting(deps.dataDir, sessionId, { ...now, told: true });
+    writeWaiting(deps.dataDir, sessionId, {
+      ...now,
+      told: true,
+      ...request !== undefined && answer.answers === true ? { answers: true } : {}
+    });
   else if (now === undefined)
     await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS);
   return "";
+}
+function requestOf(file, nowMs) {
+  if (file.kind !== "permission" || file.tool === undefined || file.until === undefined) {
+    return;
+  }
+  const left = Math.floor((file.until - nowMs) / 1000);
+  if (left < MIN_ANSWER_S)
+    return;
+  return {
+    id: file.id,
+    tool: file.tool,
+    outside: file.outside === true,
+    answer_s: Math.min(left, 600)
+  };
 }
 async function clearWaiting(input, deps) {
   const sessionId = input.session_id;
@@ -670,7 +791,7 @@ async function clearWaiting(input, deps) {
 async function waitingHook(input, deps, sleep = realSleep) {
   switch (input.hook_event_name) {
     case "PermissionRequest":
-      return permissionRequest(input, deps);
+      return permissionRequest(input, deps, sleep);
     case "Notification":
       return notification(input, deps, sleep);
     case "PostToolUse":
@@ -727,6 +848,7 @@ async function runHook(fn) {
   process.exit(0);
 }
 
+process.on("SIGTERM", () => process.exit(0));
 await runHook(async () => {
   const input = parseJson(await readStdin()) ?? {};
   return waitingHook(input, depsFromProcess([], input.cwd));

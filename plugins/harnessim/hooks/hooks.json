@@ -90,7 +90,7 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" waiting",
-            "timeout": 2
+            "timeout": 600
           }
         ]
       }

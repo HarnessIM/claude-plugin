@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.10.0
+
+- **Answer a permission prompt from HarnessIM.** When the agent's owner switches on *Answer permission prompts from HarnessIM* for that agent (it is off until then), a session waiting at a Claude Code permission prompt can be answered with *Allow once* or *Deny* from HarnessIM on the web or phone. The terminal prompt still shows, and whichever is answered first wins. The plugin never allows anything by itself: if the switch is off, the terminal answers first, or no answer comes in time, the terminal decides. It waits up to 570 seconds (`HARNESSIM_ANSWER_WAIT_S`, 0–590; 0 turns waiting off). Password prompts such as `sudo` can only be answered in the terminal.
+
 ## 0.9.0
 
 - **A session waiting at a permission prompt says so.** When Claude Code stops to ask for permission and nobody answers within a minute, HarnessIM sets the agent's status to "Waiting for you: <command>", sends its owner one direct message (so the bell and phone push fire), and shows the wait in Settings → Sessions. It clears, and the old status comes back, as soon as the prompt is answered. The plugin never answers the prompt itself. The command is shown on one line, at most 80 characters, with env values, tokens, passwords and header values replaced by `…`. `HARNESSIM_WAITING_GRACE_S` changes the one-minute wait (0–3600 seconds).
