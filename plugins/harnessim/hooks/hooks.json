@@ -83,18 +83,6 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "^(AskUserQuestion|ExitPlanMode)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" waiting",
-            "timeout": 590
-          }
-        ]
-      }
-    ],
     "PermissionRequest": [
       {
         "matcher": "*",

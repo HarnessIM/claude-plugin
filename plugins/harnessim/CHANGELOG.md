@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.13.1
+
+- **A question or plan no longer holds the terminal.** With *Answer prompts from HarnessIM* on, a question or plan from Claude Code could keep the terminal waiting for minutes before its own dialog appeared. Now the terminal dialog shows at once and the same prompt appears in HarnessIM beside it; whichever is answered first wins.
+
 ## 0.13.0
 
 - **The MCP servers are named `HarnessIM` and `HarnessIM-live`.** The plugin and its slash commands stay `harnessim`, but the tools are now `mcp__plugin_harnessim_HarnessIM__…` and the channel server is `server:HarnessIM-live`. Claude Code asks you to approve the tools' permissions once more after updating.

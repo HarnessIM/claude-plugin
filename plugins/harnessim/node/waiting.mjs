@@ -38,19 +38,16 @@ function askAnswers(asked, labelOf, choices, comment) {
 function allowWithInput(updatedInput) {
   return JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      permissionDecisionReason: "Answered from HarnessIM",
-      updatedInput
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow", updatedInput }
     }
   });
 }
 function denyWithReason(reason) {
   return JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: reason
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "deny", message: reason }
     }
   });
 }
@@ -380,8 +377,8 @@ class WakeClient {
       if (!response.ok) {
         let code;
         try {
-          const body2 = await response.json();
-          code = body2.error?.code;
+          const body = await response.json();
+          code = body.error?.code;
         } catch {
           code = undefined;
         }
@@ -459,7 +456,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "HarnessIM-live";
-var VERSION = "0.13.0";
+var VERSION = "0.13.1";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -706,8 +703,8 @@ function writeWaiting(dataDir, sessionId, file) {
   mkdirSync2(waitingDir(dataDir), { recursive: true, mode: 448 });
   writeJsonAtomic(waitingPath(dataDir, sessionId), file);
 }
-function waitingUrl(deps, wakeUrl2) {
-  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function waitingUrl(deps, wakeUrl) {
+  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/waiting`;
 }
 function waitingRequest(deps, wake, body) {
@@ -743,8 +740,8 @@ async function sendFor(deps, sessionId, body, budgetMs) {
     return answer !== null && typeof answer === "object" ? answer : {};
   });
 }
-function decisionUrl(deps, wakeUrl2, request, nonce) {
-  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function decisionUrl(deps, wakeUrl, request, nonce) {
+  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/decision?request=${encodeURIComponent(request)}&nonce=${encodeURIComponent(nonce)}`;
 }
 var STATES = [
@@ -814,7 +811,7 @@ var bound = (deps, sessionId) => {
   return wake !== undefined && wake.dead !== true;
 };
 var nowIso = (deps) => new Date(deps.now?.() ?? Date.now()).toISOString();
-var realSleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function answerWaitSeconds(deps) {
   const raw = deps.env.HARNESSIM_ANSWER_WAIT_S;
   if (raw === undefined || raw.trim() === "")
@@ -842,12 +839,11 @@ async function permissionRequest(input, deps, sleep = realSleep) {
   if (!sessionId || !bound(deps, sessionId))
     return "";
   const tool = str(input.tool_name);
-  const planning = tool !== undefined && PLANNING_TOOLS.has(tool);
-  const current = readWaiting(deps.dataDir, sessionId);
-  if (planning && current?.source !== undefined && current.source !== "permission")
-    return "";
+  if (tool !== undefined && PLANNING_TOOLS.has(tool)) {
+    return planningRequest(input, deps, sleep);
+  }
   const summary = summarize(input.tool_name, input.tool_input);
-  const budgetMs = planning ? 0 : answerWaitSeconds(deps) * 1000;
+  const budgetMs = answerWaitSeconds(deps) * 1000;
   const id = randomUUID();
   const start = deps.now?.() ?? Date.now();
   const detail = tool === undefined ? undefined : promptDetail(tool, input.tool_input);
@@ -1090,7 +1086,7 @@ async function waitingHook(input, deps, sleep = realSleep) {
     case "PermissionRequest":
       return permissionRequest(input, deps, sleep);
     case "PreToolUse":
-      return planningRequest(input, deps, sleep);
+      return "";
     case "Notification":
       return notification(input, deps, sleep);
     case "PostToolUse":
