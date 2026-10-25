@@ -377,6 +377,8 @@ var LABELS = {
   reaction: ["reaction", "reactions"],
   reminder: ["due reminder", "due reminders"],
   question: ["question update", "question updates"],
+  ticket: ["ticket update", "ticket updates"],
+  artifact: ["artifact update", "artifact updates"],
   sub_agent: ["item for your sub-agents", "items for your sub-agents"]
 };
 function labelOf(kind, count) {
@@ -389,6 +391,12 @@ function labelOf(kind, count) {
 var more = (n) => n > 0 ? ` +${String(n)} more` : "";
 function kindPhrase(entry) {
   const count = Math.max(1, Math.floor(entry.count));
+  if (entry.kind === "digest") {
+    return {
+      text: `Digest: ${String(count)} update${count === 1 ? "" : "s"}`,
+      named: false
+    };
+  }
   let text = `${String(count)} ${labelOf(entry.kind, count)}`;
   const channels = entry.channels.map(safeChannel).filter((name) => name !== undefined).slice(0, NAMES_SHOWN);
   const channelsLeft = entry.more_channels + Math.max(0, entry.channels.length - channels.length);
@@ -561,7 +569,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.10.0";
+var VERSION = "0.12.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -593,6 +601,167 @@ async function withDeadline(ms, fallback, run) {
   }
 }
 
+import { execFileSync as execFileSync2 } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  linkSync,
+  mkdirSync as mkdirSync3,
+  openSync,
+  readSync,
+  renameSync as renameSync2,
+  unlinkSync as unlinkSync2,
+  writeSync
+} from "node:fs";
+import { release } from "node:os";
+import { dirname, isAbsolute, join as join4 } from "node:path";
+var INSTALL_HEADER = "X-HarnessIM-Install";
+var OS_HEADER = "X-HarnessIM-Client-OS";
+var HOST_TOKEN_HEADER = "X-HarnessIM-Host-Token";
+var INSTALL_FILE = "install-id";
+var INSTALL_ID = /^[0-9a-f]{32}$/;
+var OS_TEXT = /^[\x20-\x7e]{1,40}$/;
+var TOKEN_TEXT = /^hh_[A-Za-z0-9_-]{43}$/;
+var READ_MAX = 4096;
+function readSmallFile(path) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > READ_MAX)
+      return;
+    const buf = Buffer.alloc(st.size);
+    let got = 0;
+    while (got < st.size) {
+      const n = readSync(fd, buf, got, st.size - got, got);
+      if (n === 0)
+        break;
+      got += n;
+    }
+    return buf.toString("utf8", 0, got);
+  } catch {
+    return;
+  } finally {
+    if (fd !== undefined)
+      closeSync(fd);
+  }
+}
+function realDeps() {
+  return {
+    platform: process.platform,
+    env: process.env,
+    home: process.env["HOME"] ?? process.env["USERPROFILE"] ?? "",
+    osRelease: release,
+    readText: readSmallFile,
+    createPrivate: (path, text, replace = false) => {
+      mkdirSync3(dirname(path), { recursive: true });
+      const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+      const fd = openSync(tmp, "wx", 384);
+      try {
+        try {
+          fchmodSync(fd, 384);
+          writeSync(fd, text);
+        } finally {
+          closeSync(fd);
+        }
+        if (replace)
+          renameSync2(tmp, path);
+        else
+          linkSync(tmp, path);
+        return true;
+      } catch (e) {
+        if (!replace && e.code === "EEXIST")
+          return false;
+        throw e;
+      } finally {
+        try {
+          unlinkSync2(tmp);
+        } catch {}
+      }
+    },
+    exec: (file, args) => execFileSync2(file, args, {
+      encoding: "utf8",
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "ignore"]
+    }),
+    randomHex: () => randomBytes(16).toString("hex")
+  };
+}
+function installId(dataDir, d) {
+  const path = join4(dataDir, INSTALL_FILE);
+  const have = d.readText(path)?.trim();
+  if (have !== undefined && INSTALL_ID.test(have))
+    return have;
+  const fresh = d.randomHex();
+  if (!INSTALL_ID.test(fresh))
+    return;
+  if (d.createPrivate(path, `${fresh}
+`))
+    return fresh;
+  const won = d.readText(path)?.trim();
+  if (won !== undefined && INSTALL_ID.test(won))
+    return won;
+  return d.createPrivate(path, `${fresh}
+`, true) ? fresh : undefined;
+}
+function field(text, key) {
+  const m = new RegExp(`^${key}=(.*)$`, "m").exec(text);
+  return m?.[1]?.trim().replace(/^(["'])(.*)\1$/, "$2") || undefined;
+}
+function clientOs(d) {
+  let text;
+  if (d.platform === "darwin") {
+    const v = d.exec("/usr/bin/sw_vers", ["-productVersion"]).trim();
+    text = /^\d+(\.\d+){0,2}$/.test(v) ? `macOS ${v}` : "macOS";
+  } else if (d.platform === "win32") {
+    const build = Number(/^\d+\.\d+\.(\d+)/.exec(d.osRelease())?.[1]);
+    text = !Number.isFinite(build) ? "Windows" : build >= 22000 ? "Windows 11" : "Windows 10";
+  } else if (d.platform === "linux") {
+    const file = d.readText("/etc/os-release") ?? d.readText("/usr/lib/os-release") ?? "";
+    const name = field(file, "NAME") ?? field(file, "ID");
+    const version = field(file, "VERSION_ID");
+    text = name === undefined ? "Linux" : version === undefined ? name : `${name} ${version}`;
+  }
+  return text !== undefined && OS_TEXT.test(text) ? text : undefined;
+}
+function absolute(v) {
+  return v !== undefined && v !== "" && isAbsolute(v) ? v : undefined;
+}
+function hostTokenPath(d) {
+  let base;
+  if (d.platform === "darwin")
+    base = d.home === "" ? undefined : join4(d.home, "Library", "Application Support");
+  else if (d.platform === "win32")
+    base = d.env["APPDATA"] || undefined;
+  else
+    base = absolute(d.env["XDG_CONFIG_HOME"]) ?? (d.home === "" ? undefined : join4(d.home, ".config"));
+  return base === undefined ? undefined : join4(base, "harnessim-cli", "token");
+}
+function hostToken(d) {
+  const path = hostTokenPath(d);
+  if (path === undefined)
+    return;
+  const text = d.readText(path)?.trim();
+  return text !== undefined && TOKEN_TEXT.test(text) ? text : undefined;
+}
+function clientHeaders(dataDir, d = realDeps()) {
+  const out = {};
+  const attempt = (name, get) => {
+    try {
+      const v = get();
+      if (v !== undefined)
+        out[name] = v;
+    } catch {}
+  };
+  attempt(INSTALL_HEADER, () => installId(dataDir, d));
+  attempt(OS_HEADER, () => clientOs(d));
+  attempt(HOST_TOKEN_HEADER, () => hostToken(d));
+  return out;
+}
+
 var TOKEN = /^wt_[A-Za-z0-9._-]+$/;
 var SESSION = /^[A-Za-z0-9._:-]{1,128}$/;
 var CLAUDE_SESSION_HEADER = "X-HarnessIM-Claude-Session";
@@ -608,6 +777,7 @@ try {
   const token = loadState(dataDir, session.sessionId).wake?.token;
   if (typeof token === "string" && TOKEN.test(token))
     headers["X-HarnessIM-Wake"] = token;
+  Object.assign(headers, clientHeaders(dataDir));
   out = JSON.stringify(headers);
 } catch {
   out = versionOnly;

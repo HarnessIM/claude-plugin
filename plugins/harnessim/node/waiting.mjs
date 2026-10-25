@@ -102,6 +102,8 @@ var LABELS = {
   reaction: ["reaction", "reactions"],
   reminder: ["due reminder", "due reminders"],
   question: ["question update", "question updates"],
+  ticket: ["ticket update", "ticket updates"],
+  artifact: ["artifact update", "artifact updates"],
   sub_agent: ["item for your sub-agents", "items for your sub-agents"]
 };
 function labelOf(kind, count) {
@@ -114,6 +116,12 @@ function labelOf(kind, count) {
 var more = (n) => n > 0 ? ` +${String(n)} more` : "";
 function kindPhrase(entry) {
   const count = Math.max(1, Math.floor(entry.count));
+  if (entry.kind === "digest") {
+    return {
+      text: `Digest: ${String(count)} update${count === 1 ? "" : "s"}`,
+      named: false
+    };
+  }
   let text = `${String(count)} ${labelOf(entry.kind, count)}`;
   const channels = entry.channels.map(safeChannel).filter((name) => name !== undefined).slice(0, NAMES_SHOWN);
   const channelsLeft = entry.more_channels + Math.max(0, entry.channels.length - channels.length);
@@ -326,7 +334,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "harnessim-live";
-var VERSION = "0.10.0";
+var VERSION = "0.12.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {

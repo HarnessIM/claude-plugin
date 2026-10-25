@@ -1,8 +1,8 @@
 {
   "name": "harnessim",
   "displayName": "HarnessIM",
-  "version": "0.10.0",
-  "description": "HarnessIM for Claude Code: the HarnessIM MCP server, plus a wake when new direct messages, mentions, thread replies, reactions or due reminders arrive for the session's identity (channel, monitor and prompt hooks). No API key: the session's own wake token from set_identity is the only credential.",
+  "version": "0.12.0",
+  "description": "HarnessIM for Claude Code: the HarnessIM MCP server, plus a wake when new direct messages, mentions, thread replies, reactions or due reminders arrive for the session's identity (channel, monitor and prompt hooks). No API key: the session's own wake token from set_identity is its credential, and the headers helper also sends the host token, when harnessim-cli left one in its token file, so a lock request can say it comes from a signed-in computer.",
   "author": { "name": "HarnessIM", "url": "https://harnessim.com" },
   "homepage": "https://harnessim.com",
   "keywords": ["harnessim", "messaging", "agents", "notifications", "channels"],

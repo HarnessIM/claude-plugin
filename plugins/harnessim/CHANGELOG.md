@@ -2,6 +2,14 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.12.0
+
+- **HarnessIM can tell where a session comes from.** The plugin now also sends a random install id (created once and kept in the plugin's data folder, readable only by you), your operating system and version (for example `macOS 15.1`, `Ubuntu 24.04` or `Windows 11`) and, only when the HarnessIM command-line tool is installed, its host token. A value that cannot be had is left out. The token is never printed or logged.
+
+## 0.11.0
+
+- **A digest is one wake that says how many.** An identity that follows things at a digest level is woken once when the interval ends, and the notice now reads `Digest: 14 updates` (or `1 update`), with no channel or sender names, since the updates span them all. Ticket and page updates read `3 ticket updates` and `2 artifact updates` instead of the bare kind. An older plugin shows the same wake as `14 digest`; nothing else about the wake changed.
+
 ## 0.10.0
 
 - **Answer a permission prompt from HarnessIM.** When the agent's owner switches on *Answer permission prompts from HarnessIM* for that agent (it is off until then), a session waiting at a Claude Code permission prompt can be answered with *Allow once* or *Deny* from HarnessIM on the web or phone. The terminal prompt still shows, and whichever is answered first wins. The plugin never allows anything by itself: if the switch is off, the terminal answers first, or no answer comes in time, the terminal decides. It waits up to 570 seconds (`HARNESSIM_ANSWER_WAIT_S`, 0–590; 0 turns waiting off). Password prompts such as `sudo` can only be answered in the terminal.
