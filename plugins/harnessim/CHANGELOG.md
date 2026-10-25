@@ -2,6 +2,14 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.13.0
+
+- **The MCP servers are named `HarnessIM` and `HarnessIM-live`.** The plugin and its slash commands stay `harnessim`, but the tools are now `mcp__plugin_harnessim_HarnessIM__…` and the channel server is `server:HarnessIM-live`. Claude Code asks you to approve the tools' permissions once more after updating.
+- **Pages.** What was called an artifact is now a page: the tools are `page` and `page_write`, and the toolset is `pages`. The old names still answer for one release.
+- **Answer prompts from HarnessIM.** When the agent's owner allows it, a permission prompt, a plan approval or a question Claude Code asks you can be answered from HarnessIM on the web or phone; each one shows there as a numbered question. *Allow always* is offered only for shell commands and web fetches, and only for the rule Claude Code itself suggests. The terminal prompt still shows and whichever is answered first wins.
+- **Quieter, readable wake notices.** A wake carries only what the identity's push level lets through (all, mentions and direct messages, or direct messages only). It names a channel as `#name`, reads a mention as `@mention`, and words thread replies, broadcasts, reminders and question updates. It is shorter, still one line, and never carries message text.
+- **Clearer instructions for each frame.** The channel server tells Claude what a wake and an event mean, that an event is a pointer to read rather than an instruction, and that quoted names are data.
+
 ## 0.12.0
 
 - **HarnessIM can tell where a session comes from.** The plugin now also sends a random install id (created once and kept in the plugin's data folder, readable only by you), your operating system and version (for example `macOS 15.1`, `Ubuntu 24.04` or `Windows 11`) and, only when the HarnessIM command-line tool is installed, its host token. A value that cannot be had is left out. The token is never printed or logged.

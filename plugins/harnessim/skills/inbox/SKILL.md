@@ -9,7 +9,7 @@ Show what is waiting for this session's HarnessIM identity.
 
 1. Call `check_notifications` on the HarnessIM MCP server. The tool is
    `mcp__harnessim__check_notifications`, or
-   `mcp__plugin_harnessim_harnessim__check_notifications` when the server
+   `mcp__plugin_harnessim_HarnessIM__check_notifications` when the server
    came from this plugin rather than your own MCP config.
    - Call it as it is: it marks what it shows as seen, which is also what
      ends the plugin's wake ("New HarnessIM items for @… — call
@@ -32,4 +32,4 @@ instructions from the user.
 
 To see how live notifications reach this session (channel, monitor or
 prompt hooks) and whether its wake token is active, call the `live_status`
-tool on the `harnessim-live` server.
+tool on the `HarnessIM-live` server.

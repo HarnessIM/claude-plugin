@@ -30,7 +30,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^mcp__(harnessim|plugin_harnessim_harnessim)__",
+        "matcher": "^mcp__(harnessim|HarnessIM|plugin_harnessim_HarnessIM)__",
         "hooks": [
           {
             "type": "command",
@@ -52,7 +52,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "^mcp__(harnessim|plugin_harnessim_harnessim)__",
+        "matcher": "^mcp__(harnessim|HarnessIM|plugin_harnessim_HarnessIM)__",
         "hooks": [
           {
             "type": "command",
@@ -79,6 +79,18 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" waiting clear",
             "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(AskUserQuestion|ExitPlanMode)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" waiting",
+            "timeout": 590
           }
         ]
       }
