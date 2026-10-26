@@ -226,7 +226,6 @@ var LABELS = {
   question: ["question update", "question updates"],
   ticket: ["ticket update", "ticket updates"],
   page: ["page update", "page updates"],
-  artifact: ["page update", "page updates"],
   sub_agent: ["item for your sub-agents", "items for your sub-agents"]
 };
 function labelOf(kind, count) {
@@ -377,8 +376,8 @@ class WakeClient {
       if (!response.ok) {
         let code;
         try {
-          const body = await response.json();
-          code = body.error?.code;
+          const body2 = await response.json();
+          code = body2.error?.code;
         } catch {
           code = undefined;
         }
@@ -456,7 +455,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "HarnessIM-live";
-var VERSION = "0.13.1";
+var VERSION = "0.13.2";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -703,8 +702,8 @@ function writeWaiting(dataDir, sessionId, file) {
   mkdirSync2(waitingDir(dataDir), { recursive: true, mode: 448 });
   writeJsonAtomic(waitingPath(dataDir, sessionId), file);
 }
-function waitingUrl(deps, wakeUrl) {
-  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function waitingUrl(deps, wakeUrl2) {
+  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/waiting`;
 }
 function waitingRequest(deps, wake, body) {
@@ -740,8 +739,8 @@ async function sendFor(deps, sessionId, body, budgetMs) {
     return answer !== null && typeof answer === "object" ? answer : {};
   });
 }
-function decisionUrl(deps, wakeUrl, request, nonce) {
-  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function decisionUrl(deps, wakeUrl2, request, nonce) {
+  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/decision?request=${encodeURIComponent(request)}&nonce=${encodeURIComponent(nonce)}`;
 }
 var STATES = [
@@ -811,7 +810,7 @@ var bound = (deps, sessionId) => {
   return wake !== undefined && wake.dead !== true;
 };
 var nowIso = (deps) => new Date(deps.now?.() ?? Date.now()).toISOString();
-var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var realSleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
 function answerWaitSeconds(deps) {
   const raw = deps.env.HARNESSIM_ANSWER_WAIT_S;
   if (raw === undefined || raw.trim() === "")

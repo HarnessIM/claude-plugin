@@ -140,7 +140,6 @@ var LABELS = {
   question: ["question update", "question updates"],
   ticket: ["ticket update", "ticket updates"],
   page: ["page update", "page updates"],
-  artifact: ["page update", "page updates"],
   sub_agent: ["item for your sub-agents", "items for your sub-agents"]
 };
 function labelOf(kind, count) {
@@ -296,8 +295,8 @@ class WakeClient {
       if (!response.ok) {
         let code;
         try {
-          const body = await response.json();
-          code = body.error?.code;
+          const body2 = await response.json();
+          code = body2.error?.code;
         } catch {
           code = undefined;
         }
@@ -335,7 +334,7 @@ class WakeClient {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "HarnessIM-live";
-var VERSION = "0.13.1";
+var VERSION = "0.13.2";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -697,6 +696,29 @@ function lostOrDead(deps, sessionId, nowMs) {
   });
   return text === undefined ? { kind: "dead" } : { kind: "lost", text };
 }
+var OK_STAMP_MS = 60000;
+function noteWakeAnswered(deps, sessionId, tier, nowMs) {
+  try {
+    const now = new Date(nowMs);
+    const live = loadState(deps.dataDir, sessionId, now).live;
+    const failing = live !== undefined && (live.failures > 0 || live.downSince !== undefined);
+    const stamped = Date.parse(live?.okAt ?? "");
+    if (!failing && nowMs - stamped < OK_STAMP_MS)
+      return;
+    updateState(deps.dataDir, sessionId, (state) => {
+      const next = state.live ?? { failures: 0 };
+      if (next.failures > 0 || next.downSince !== undefined) {
+        next.recoveredAt = now.toISOString();
+      }
+      next.failures = 0;
+      delete next.failingSince;
+      delete next.downSince;
+      next.okAt = now.toISOString();
+      next.okTier = tier;
+      state.live = next;
+    }, now);
+  } catch {}
+}
 async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
   const state = loadState(deps.dataDir, sessionId, new Date(deps.now?.() ?? Date.now()));
   const wake = state.wake;
@@ -720,6 +742,7 @@ async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
     }
     throw error;
   }
+  noteWakeAnswered(deps, sessionId, tier, nowMs);
   const held = answer.held === true ? { held: true } : {};
   const toolsLine = answer.toolsUpdate === undefined ? undefined : claimToolsUpdate(deps.dataDir, sessionId, answer.toolsUpdate, new Date(nowMs));
   const tools = toolsLine === undefined ? {} : { toolsUpdate: toolsLine };
@@ -738,6 +761,7 @@ async function probeWake(deps, sessionId, timeoutMs) {
   try {
     const answer = await askWake(deps, sessionId, wake, nowMs, (url) => wakeClient(deps).check(url, wake.token, wake.since, timeoutMs));
     const now = new Date(nowMs);
+    noteWakeAnswered(deps, sessionId, "live_status", nowMs);
     const pluginUpdate = answer.pluginUpdate === undefined ? undefined : claimPluginUpdate(deps.dataDir, sessionId, answer.pluginUpdate, now);
     return {
       wakeToken: `active (confirmed ${now.toISOString()})`,
@@ -926,10 +950,10 @@ function claudePid(env, chain) {
 function resolveSessionId(env, dataDir, chain, read = (p) => readJson(p)) {
   const envPid = Number(env.CLAUDE_PID);
   const candidates = Number.isFinite(envPid) && envPid > 1 ? [envPid, ...chain] : [...chain];
-  for (const pid of candidates) {
-    const pointer = read(pointerPath(dataDir, pid));
+  for (const pid2 of candidates) {
+    const pointer = read(pointerPath(dataDir, pid2));
     if (pointer?.sessionId)
-      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid };
+      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid2 };
   }
   const fromEnv = env.CLAUDE_CODE_SESSION_ID?.trim();
   const pid = claudePid(env, chain);

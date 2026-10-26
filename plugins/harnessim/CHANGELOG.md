@@ -2,6 +2,10 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.13.2
+
+- **`live_status` no longer says `down` while the server is answering.** Before, only the loop that recorded a failure could clear it, so a session on the monitor or hooks tier could keep showing `down` for hours after the server recovered. Now any answered wake check, from any tier or from `live_status` itself, clears the failures and records which tier is live. A session with no loop of its own shows an old failure as `unknown`, never `down`.
+
 ## 0.13.1
 
 - **A question or plan no longer holds the terminal.** With *Answer prompts from HarnessIM* on, a question or plan from Claude Code could keep the terminal waiting for minutes before its own dialog appeared. Now the terminal dialog shows at once and the same prompt appears in HarnessIM beside it; whichever is answered first wins.
