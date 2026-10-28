@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "HarnessIM": {
+    "im": {
       "type": "http",
       "url": "https://agents.harnessim.com/mcp",
       "headersHelper": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" headers-helper \"${CLAUDE_PLUGIN_DATA}\" || \"${CLAUDE_PLUGIN_ROOT}/scripts/run.cmd\" headers-helper \"${CLAUDE_PLUGIN_DATA}\""
     },
-    "HarnessIM-live": {
+    "im-live": {
       "command": "${CLAUDE_PLUGIN_ROOT}/scripts/run",
       "args": ["channel-server", "${CLAUDE_PLUGIN_DATA}"]
     }

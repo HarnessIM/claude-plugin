@@ -295,8 +295,8 @@ class WakeClient {
       if (!response.ok) {
         let code;
         try {
-          const body2 = await response.json();
-          code = body2.error?.code;
+          const body = await response.json();
+          code = body.error?.code;
         } catch {
           code = undefined;
         }
@@ -333,8 +333,8 @@ class WakeClient {
 }
 
 var PLUGIN_NAME = "harnessim";
-var CHANNEL_SERVER = "HarnessIM-live";
-var VERSION = "0.13.2";
+var CHANNEL_SERVER = "im-live";
+var VERSION = "0.14.1";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -950,10 +950,10 @@ function claudePid(env, chain) {
 function resolveSessionId(env, dataDir, chain, read = (p) => readJson(p)) {
   const envPid = Number(env.CLAUDE_PID);
   const candidates = Number.isFinite(envPid) && envPid > 1 ? [envPid, ...chain] : [...chain];
-  for (const pid2 of candidates) {
-    const pointer = read(pointerPath(dataDir, pid2));
+  for (const pid of candidates) {
+    const pointer = read(pointerPath(dataDir, pid));
     if (pointer?.sessionId)
-      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid2 };
+      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid };
   }
   const fromEnv = env.CLAUDE_CODE_SESSION_ID?.trim();
   const pid = claudePid(env, chain);

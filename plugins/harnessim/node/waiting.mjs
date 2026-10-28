@@ -6,11 +6,9 @@ import { hostname } from "node:os";
 import { basename, isAbsolute, join as join3, relative, resolve, sep } from "node:path";
 
 var obj = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
-function singleQuestion(toolInput) {
-  const questions = obj(toolInput)?.["questions"];
-  if (!Array.isArray(questions) || questions.length !== 1)
-    return;
-  const only = obj(questions[0]);
+var MAX_QUESTIONS = 4;
+function askedOf(raw) {
+  const only = obj(raw);
   const question = only?.["question"];
   const options = only?.["options"];
   if (typeof question !== "string" || question.trim() === "")
@@ -21,6 +19,21 @@ function singleQuestion(toolInput) {
   if (labels.length < 2 || labels.length !== options.length)
     return;
   return { question, labels, multiSelect: only?.["multiSelect"] === true };
+}
+function askedQuestions(toolInput) {
+  const questions = obj(toolInput)?.["questions"];
+  if (!Array.isArray(questions) || questions.length < 1 || questions.length > MAX_QUESTIONS)
+    return;
+  const asked = [];
+  for (const raw of questions) {
+    const one = askedOf(raw);
+    if (one === undefined)
+      return;
+    asked.push(one);
+  }
+  if (new Set(asked.map((a) => a.question)).size !== asked.length)
+    return;
+  return asked;
 }
 function askAnswers(asked, labelOf, choices, comment) {
   if (choices !== undefined && choices.length > 0) {
@@ -376,8 +389,8 @@ class WakeClient {
       if (!response.ok) {
         let code;
         try {
-          const body2 = await response.json();
-          code = body2.error?.code;
+          const body = await response.json();
+          code = body.error?.code;
         } catch {
           code = undefined;
         }
@@ -454,8 +467,8 @@ function resolveDataDir(env, argv, home) {
 }
 
 var PLUGIN_NAME = "harnessim";
-var CHANNEL_SERVER = "HarnessIM-live";
-var VERSION = "0.13.2";
+var CHANNEL_SERVER = "im-live";
+var VERSION = "0.14.1";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -702,8 +715,8 @@ function writeWaiting(dataDir, sessionId, file) {
   mkdirSync2(waitingDir(dataDir), { recursive: true, mode: 448 });
   writeJsonAtomic(waitingPath(dataDir, sessionId), file);
 }
-function waitingUrl(deps, wakeUrl2) {
-  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function waitingUrl(deps, wakeUrl) {
+  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/waiting`;
 }
 function waitingRequest(deps, wake, body) {
@@ -739,8 +752,8 @@ async function sendFor(deps, sessionId, body, budgetMs) {
     return answer !== null && typeof answer === "object" ? answer : {};
   });
 }
-function decisionUrl(deps, wakeUrl2, request, nonce) {
-  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function decisionUrl(deps, wakeUrl, request, nonce) {
+  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/decision?request=${encodeURIComponent(request)}&nonce=${encodeURIComponent(nonce)}`;
 }
 var STATES = [
@@ -810,7 +823,7 @@ var bound = (deps, sessionId) => {
   return wake !== undefined && wake.dead !== true;
 };
 var nowIso = (deps) => new Date(deps.now?.() ?? Date.now()).toISOString();
-var realSleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function answerWaitSeconds(deps) {
   const raw = deps.env.HARNESSIM_ANSWER_WAIT_S;
   if (raw === undefined || raw.trim() === "")
@@ -873,34 +886,77 @@ async function permissionRequest(input, deps, sleep = realSleep) {
       return decisionOutput(decision.state, file.suggestion, decision.rule);
     }
     return "";
-  });
+  }, "");
 }
-async function awaitAnswer(deps, sessionId, id, budgetMs, sleep, render) {
+async function awaitAnswer(deps, sessionId, id, budgetMs, sleep, render, none, clear = true) {
   let waited = 0;
   while (waited < budgetMs) {
     const file = readWaiting(deps.dataDir, sessionId);
     if (file === undefined || file.id !== id)
-      return "";
+      return none;
     if (file.told === true && file.answers !== true)
-      return "";
+      return none;
     if (file.told !== true) {
       await sleep(LOCAL_POLL_MS);
       waited += LOCAL_POLL_MS;
       continue;
     }
     if (file.nonce === undefined)
-      return "";
+      return none;
     const decision = await readDecision(deps, sessionId, id, file.nonce);
     if (decision?.state === "gone")
-      return "";
+      return none;
     if (decision !== undefined && decision.state !== "pending") {
-      await clearWaiting({ session_id: sessionId }, deps);
+      if (clear)
+        await clearWaiting({ session_id: sessionId }, deps);
       return render(decision, file);
     }
     await sleep(DECISION_POLL_MS);
     waited += DECISION_POLL_MS;
   }
-  return "";
+  return none;
+}
+async function offerPrompt(deps, sessionId, tool, fields, summary, until, sleep, render, none, clear) {
+  const id = randomUUID();
+  const now = deps.now?.() ?? Date.now();
+  const file = {
+    id,
+    kind: "permission",
+    summary,
+    at: nowIso(deps),
+    tool: tool.slice(0, 64),
+    outside: false,
+    until,
+    nonce: newNonce(),
+    ...fields,
+    ...where(deps)
+  };
+  writeWaiting(deps.dataDir, sessionId, file);
+  const request = requestOf(file, now, 1);
+  if (request === undefined)
+    return none;
+  const answer = await sendFor(deps, sessionId, { waiting: true, kind: "permission", summary, request }, NOTICE_BUDGET_MS);
+  const stored = readWaiting(deps.dataDir, sessionId);
+  if (answer === undefined) {
+    if (stored?.id === id)
+      rmSync2(waitingPath(deps.dataDir, sessionId), { force: true });
+    return none;
+  }
+  if (stored === undefined) {
+    await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS);
+    return none;
+  }
+  if (stored.id !== id)
+    return none;
+  writeWaiting(deps.dataDir, sessionId, {
+    ...stored,
+    told: true,
+    ...answer.answers === true ? { answers: true } : {}
+  });
+  if (answer.answers !== true)
+    return none;
+  const left = until - (deps.now?.() ?? Date.now());
+  return awaitAnswer(deps, sessionId, id, left, sleep, (decision) => render(decision), none, clear);
 }
 async function planningRequest(input, deps, sleep = realSleep) {
   const sessionId = input.session_id;
@@ -913,80 +969,41 @@ async function planningRequest(input, deps, sleep = realSleep) {
   if (budgetMs === 0)
     return "";
   const raw = input.tool_input !== null && typeof input.tool_input === "object" ? input.tool_input : {};
-  let asked;
-  let sentOf;
-  let fields;
+  const until = (deps.now?.() ?? Date.now()) + budgetMs;
   if (tool === "ExitPlanMode") {
     const plan = str(raw["plan"]);
     if (plan === undefined)
       return "";
-    fields = { source: "plan", plan: clip(redact(plan), 8000) };
-  } else {
-    asked = singleQuestion(input.tool_input);
-    if (asked === undefined)
-      return "";
-    sentOf = new Map(asked.labels.map((l) => [clip(redact(l), 200), l]));
-    if (sentOf.size !== asked.labels.length || sentOf.size < 2)
+    const shown = clip(redact(plan), 8000);
+    return offerPrompt(deps, sessionId, tool, { source: "plan", plan: shown }, clip(`${tool}: ${shown}`, SUMMARY_MAX2), until, sleep, (decision) => planOutput(input.tool_input, decision.choices, decision.comment), "", true);
+  }
+  const asked = askedQuestions(input.tool_input);
+  if (asked === undefined)
+    return "";
+  const prepared = [];
+  for (const q of asked) {
+    const sentOf = new Map(q.labels.map((l) => [clip(redact(l), 200), l]));
+    if (sentOf.size !== q.labels.length || sentOf.size < 2)
       return "";
     if (sentOf.size > 20)
       return "";
-    fields = {
+    prepared.push({ q, sentOf });
+  }
+  const answers = {};
+  for (const [i, { q, sentOf }] of prepared.entries()) {
+    const question = clip(redact(q.question), 300);
+    const place = prepared.length === 1 ? "" : ` (${i + 1} of ${prepared.length})`;
+    const one = await offerPrompt(deps, sessionId, tool, {
       source: "planning",
-      question: clip(redact(asked.question), 300),
+      question,
       options: [...sentOf.keys()],
-      ...asked.multiSelect ? { multi: true } : {}
-    };
-  }
-  const summary = clip(`${tool}: ${fields.plan ?? fields.question ?? ""}`, SUMMARY_MAX2);
-  const id = randomUUID();
-  const nonce = newNonce();
-  const start = deps.now?.() ?? Date.now();
-  const file = {
-    id,
-    kind: "permission",
-    summary,
-    at: nowIso(deps),
-    tool: tool.slice(0, 64),
-    outside: false,
-    until: start + budgetMs,
-    nonce,
-    ...fields,
-    ...where(deps)
-  };
-  writeWaiting(deps.dataDir, sessionId, file);
-  const request = requestOf(file, start, 1);
-  if (request === undefined)
-    return "";
-  const answer = await sendFor(deps, sessionId, { waiting: true, kind: "permission", summary, request }, NOTICE_BUDGET_MS);
-  const now = readWaiting(deps.dataDir, sessionId);
-  if (answer === undefined) {
-    if (now?.id === id)
-      rmSync2(waitingPath(deps.dataDir, sessionId), { force: true });
-    return "";
-  }
-  if (now === undefined) {
-    await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS);
-    return "";
-  }
-  if (now.id !== id)
-    return "";
-  writeWaiting(deps.dataDir, sessionId, {
-    ...now,
-    told: true,
-    ...answer.answers === true ? { answers: true } : {}
-  });
-  if (answer.answers !== true)
-    return "";
-  return awaitAnswer(deps, sessionId, id, budgetMs, sleep, (decision) => {
-    if (decision.state !== "answered")
+      ...q.multiSelect ? { multi: true } : {}
+    }, clip(`${tool}${place}: ${question}`, SUMMARY_MAX2), until, sleep, (decision) => askAnswers(q, (label) => sentOf.get(label), decision.choices, decision.comment), undefined, i === prepared.length - 1);
+    if (one === undefined)
       return "";
-    if (asked !== undefined && sentOf !== undefined) {
-      const sent = sentOf;
-      const answers = askAnswers(asked, (label) => sent.get(label), decision.choices, decision.comment);
-      return answers === undefined ? "" : askOutput(input.tool_input, answers);
-    }
-    return planOutput(input.tool_input, decision.choices, decision.comment);
-  });
+    Object.assign(answers, one);
+  }
+  return askOutput(input.tool_input, answers);
 }
 function graceSeconds(deps) {
   const raw = Number(deps.env.HARNESSIM_WAITING_GRACE_S);

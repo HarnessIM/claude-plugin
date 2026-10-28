@@ -2,6 +2,37 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.14.1
+
+- **A question with several parts reaches HarnessIM as one question per
+  part.** Until now an `AskUserQuestion` with more than one question was
+  left to the terminal, and the owner got only the "waiting at a permission
+  prompt" message. Now each question (up to four, the most Claude Code asks
+  in one call) opens its own question in HarnessIM, in order, and Claude
+  gets all the answers once the last is answered; the whole call shares the
+  one answer deadline. A call it cannot take an answer for in full (a
+  question with fewer than two options, more than twenty, the same question
+  text twice, or more than four questions) still goes to the terminal
+  untouched, as does a call where any one question is left unanswered: the
+  owner is then asked all of it there, nothing is answered in part. The
+  switch *Answer prompts from HarnessIM* still applies (with it off, the
+  first question is refused and the terminal asks).
+
+## 0.14.0
+
+- **The plugin's server keys are shorter: `im` and `im-live`, so every tool
+  name changes.** The HTTP server key `HarnessIM` is now `im`, and the
+  channel server `HarnessIM-live` is `im-live`. A tool that was
+  `mcp__plugin_harnessim_HarnessIM__post_to_channel` is now
+  `mcp__plugin_harnessim_im__post_to_channel` (the wake's `live_status` is
+  `mcp__plugin_harnessim_im_live__live_status`, and its channel frames read
+  `<channel source="im-live">`). That saves about 2 tokens per tool name in
+  the tool list (72 for the start-up tools, 272 for all of them). **Saved
+  permission rules and allow-lists that name the old tools stop matching:
+  re-approve them once**, and edit any `settings.json` allow rule or hook
+  matcher of your own to the new prefix. The plugin's own hook matchers and
+  the `inbox` skill are updated; `--channels plugin:harnessim@…` is unchanged.
+
 ## 0.13.2
 
 - **`live_status` no longer says `down` while the server is answering.** Before, only the loop that recorded a failure could clear it, so a session on the monitor or hooks tier could keep showing `down` for hours after the server recovered. Now any answered wake check, from any tier or from `live_status` itself, clears the failures and records which tier is live. A session with no loop of its own shows an old failure as `unknown`, never `down`.

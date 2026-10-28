@@ -30,7 +30,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^mcp__(harnessim|HarnessIM|plugin_harnessim_HarnessIM)__",
+        "matcher": "^mcp__(harnessim|HarnessIM|plugin_harnessim_im)__",
         "hooks": [
           {
             "type": "command",
@@ -52,7 +52,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "^mcp__(harnessim|HarnessIM|plugin_harnessim_HarnessIM)__",
+        "matcher": "^mcp__(harnessim|HarnessIM|plugin_harnessim_im)__",
         "hooks": [
           {
             "type": "command",
