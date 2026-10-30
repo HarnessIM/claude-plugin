@@ -468,7 +468,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.14.4";
+var VERSION = "0.14.5";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -1134,93 +1134,15 @@ async function waitingHook(input, deps, sleep = realSleep) {
 
 import { homedir } from "node:os";
 
-import { execFileSync } from "node:child_process";
-import { mkdirSync as mkdirSync3, readFileSync as readFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
-function pointerPath(dataDir, pid) {
-  return join4(dataDir, "by-pid", `${pid}.json`);
-}
-function writePointer(dataDir, pid, sessionId, source, now = new Date) {
-  mkdirSync3(join4(dataDir, "by-pid"), { recursive: true });
-  writeJsonAtomic(pointerPath(dataDir, pid), { sessionId, at: now.toISOString(), source });
-}
-function parentPid(pid) {
-  try {
-    const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
-    const after = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    const ppid = Number(after[1]);
-    return Number.isFinite(ppid) && ppid > 0 ? ppid : undefined;
-  } catch {
-    try {
-      const out = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
-        encoding: "utf8",
-        timeout: 1000
-      });
-      const ppid = Number(out.trim());
-      return Number.isFinite(ppid) && ppid > 0 ? ppid : undefined;
-    } catch {
-      return;
-    }
-  }
-}
-function ancestors(start, depth = 6, parent = parentPid) {
-  const out = [];
-  let pid = start;
-  while (pid !== undefined && pid > 1 && out.length < depth) {
-    out.push(pid);
-    pid = parent(pid);
-  }
-  return out;
-}
-function claudePid(env, chain) {
-  const fromEnv = Number(env.CLAUDE_PID);
-  if (Number.isFinite(fromEnv) && fromEnv > 1)
-    return fromEnv;
-  return chain[0];
-}
-function resolveSessionId(env, dataDir, chain, read = (p) => readJson(p)) {
-  const envPid = Number(env.CLAUDE_PID);
-  const candidates = Number.isFinite(envPid) && envPid > 1 ? [envPid, ...chain] : [...chain];
-  for (const pid2 of candidates) {
-    const pointer = read(pointerPath(dataDir, pid2));
-    if (pointer?.sessionId)
-      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid2 };
-  }
-  const fromEnv = env.CLAUDE_CODE_SESSION_ID?.trim();
-  const pid = claudePid(env, chain);
-  if (fromEnv)
-    return { sessionId: fromEnv, how: "env", ...pid ? { claudePid: pid } : {} };
-  return { sessionId: `pid-${sanitizeId(String(pid ?? process.pid))}`, how: "synthetic", ...pid ? { claudePid: pid } : {} };
-}
-function pidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
-  }
-}
-function processArgv(pid) {
-  try {
-    return readFileSync2(`/proc/${pid}/cmdline`, "utf8").split("\x00").filter(Boolean);
-  } catch {
-    try {
-      return execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 1000 }).trim().split(/\s+/);
-    } catch {
-      return [];
-    }
-  }
-}
-
-import { join as join5 } from "node:path";
-import { mkdirSync as mkdirSync4 } from "node:fs";
+import { mkdirSync as mkdirSync3 } from "node:fs";
 var HEARTBEAT_MS = 1e4;
 var HEARTBEAT_STALE_MS = 35000;
 function heartbeatPath(dataDir, sessionId) {
-  return join5(sessionDir(dataDir, sessionId), "channel.json");
+  return join4(sessionDir(dataDir, sessionId), "channel.json");
 }
 function writeHeartbeat(dataDir, sessionId, beat) {
-  mkdirSync4(sessionDir(dataDir, sessionId), { recursive: true });
+  mkdirSync3(sessionDir(dataDir, sessionId), { recursive: true });
   writeJsonAtomic(heartbeatPath(dataDir, sessionId), beat);
 }
 function channelActive(dataDir, sessionId, now, alive, read = (p) => readJson(p)) {
@@ -1280,21 +1202,27 @@ function decideChannel(input) {
     how: "not opted in (no channel flag naming this plugin)"
   };
 }
-function channelEventsReach(input) {
-  const flag = (value) => {
-    const v = value?.trim().toLowerCase();
-    if (v === "on" || v === "1" || v === "true")
-      return true;
-    if (v === "off" || v === "0" || v === "false")
-      return false;
-    return;
+function channelEventsDecision(input) {
+  const v = input.override?.trim().toLowerCase();
+  if (v === "on" || v === "1" || v === "true") {
+    return {
+      reach: true,
+      how: "env HARNESSIM_CHANNEL_EVENTS=on: the wake leaves out what the server's channel events announce"
+    };
+  }
+  if (v === "off" || v === "0" || v === "false") {
+    return {
+      reach: false,
+      how: "env HARNESSIM_CHANNEL_EVENTS=off: the wake announces everything"
+    };
+  }
+  return {
+    reach: false,
+    how: "channel events assumed absent (the channel flag alone is not trusted): the wake announces everything; set HARNESSIM_CHANNEL_EVENTS=on to rely on the server's events"
   };
-  const events = flag(input.override);
-  if (events !== undefined)
-    return events;
-  if (flag(input.channelOverride) === true)
-    return true;
-  return channelFlagNames(input.claudeArgv).some((entry) => entry === `plugin:${input.plugin}` || entry.startsWith(`plugin:${input.plugin}@`) || entry === `server:${input.server}` || entry === `server:plugin:${input.plugin}:${input.server}` || entry.toLowerCase() === "server:harnessim");
+}
+function channelEventsReach(input) {
+  return channelEventsDecision(input).reach;
 }
 var CHANNEL_EVENT_KINDS = [
   "dm",
@@ -1328,22 +1256,12 @@ function parseJson(text) {
 }
 function depsFromProcess(argv = process.argv.slice(2), cwd) {
   const env = process.env;
-  let reach;
   return {
     env,
     home: homedir(),
     dataDir: resolveDataDir(env, argv, homedir()),
     cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd(),
-    channelEvents: () => {
-      reach ??= channelEventsReach({
-        override: env.HARNESSIM_CHANNEL_EVENTS,
-        channelOverride: env.HARNESSIM_CHANNEL,
-        claudeArgv: processArgv(claudePid(env, ancestors(process.ppid)) ?? process.ppid),
-        plugin: PLUGIN_NAME,
-        server: "im"
-      });
-      return reach;
-    }
+    channelEvents: () => channelEventsReach({ override: env.HARNESSIM_CHANNEL_EVENTS })
   };
 }
 async function runHook(fn) {

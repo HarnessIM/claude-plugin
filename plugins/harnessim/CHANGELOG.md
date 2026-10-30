@@ -2,6 +2,16 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.14.5
+
+- **The channel flag alone no longer quiets the wake.** Since 0.14.3 a session
+  started with the channels flag relied on the server's channel events for
+  mentions and direct messages, and the wake left them out. When those events
+  did not arrive, the session heard nothing. Now the wake announces everything
+  unless you set `HARNESSIM_CHANNEL_EVENTS=on` to say the server's events reach
+  the session. A session where both paths deliver may see a mention twice;
+  that is preferred to missing it.
+
 ## 0.14.4
 
 - **A question stays open until it is really answered.** Another tool

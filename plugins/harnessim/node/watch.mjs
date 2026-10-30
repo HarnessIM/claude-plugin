@@ -401,21 +401,27 @@ function decideChannel(input) {
     how: "not opted in (no channel flag naming this plugin)"
   };
 }
-function channelEventsReach(input) {
-  const flag = (value) => {
-    const v = value?.trim().toLowerCase();
-    if (v === "on" || v === "1" || v === "true")
-      return true;
-    if (v === "off" || v === "0" || v === "false")
-      return false;
-    return;
+function channelEventsDecision(input) {
+  const v = input.override?.trim().toLowerCase();
+  if (v === "on" || v === "1" || v === "true") {
+    return {
+      reach: true,
+      how: "env HARNESSIM_CHANNEL_EVENTS=on: the wake leaves out what the server's channel events announce"
+    };
+  }
+  if (v === "off" || v === "0" || v === "false") {
+    return {
+      reach: false,
+      how: "env HARNESSIM_CHANNEL_EVENTS=off: the wake announces everything"
+    };
+  }
+  return {
+    reach: false,
+    how: "channel events assumed absent (the channel flag alone is not trusted): the wake announces everything; set HARNESSIM_CHANNEL_EVENTS=on to rely on the server's events"
   };
-  const events = flag(input.override);
-  if (events !== undefined)
-    return events;
-  if (flag(input.channelOverride) === true)
-    return true;
-  return channelFlagNames(input.claudeArgv).some((entry) => entry === `plugin:${input.plugin}` || entry.startsWith(`plugin:${input.plugin}@`) || entry === `server:${input.server}` || entry === `server:plugin:${input.plugin}:${input.server}` || entry.toLowerCase() === "server:harnessim");
+}
+function channelEventsReach(input) {
+  return channelEventsDecision(input).reach;
 }
 var CHANNEL_EVENT_KINDS = [
   "dm",
@@ -584,7 +590,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.14.4";
+var VERSION = "0.14.5";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -1193,22 +1199,12 @@ function parseJson(text) {
 }
 function depsFromProcess(argv = process.argv.slice(2), cwd) {
   const env = process.env;
-  let reach;
   return {
     env,
     home: homedir(),
     dataDir: resolveDataDir(env, argv, homedir()),
     cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd(),
-    channelEvents: () => {
-      reach ??= channelEventsReach({
-        override: env.HARNESSIM_CHANNEL_EVENTS,
-        channelOverride: env.HARNESSIM_CHANNEL,
-        claudeArgv: processArgv(claudePid(env, ancestors(process.ppid)) ?? process.ppid),
-        plugin: PLUGIN_NAME,
-        server: "im"
-      });
-      return reach;
-    }
+    channelEvents: () => channelEventsReach({ override: env.HARNESSIM_CHANNEL_EVENTS })
   };
 }
 async function runHook(fn) {
