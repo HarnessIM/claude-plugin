@@ -216,157 +216,7 @@ function wakeNotice(identity, waiting) {
   return { identity: who, text: wakeNoticeText(who, waiting) };
 }
 
-function wakeUrl(base, since, wait = 0) {
-  const query = [
-    ...since === null ? [] : [`since=${encodeURIComponent(since)}`],
-    ...wait > 0 ? [`wait=${String(wait)}`] : []
-  ];
-  return query.length === 0 ? base : `${base}?${query.join("&")}`;
-}
-var WAKE_HOLD_RESPONSE_HEADER = "harnessim-wake-hold";
-var count = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
-function parseWaiting(value) {
-  if (!value || typeof value !== "object")
-    return;
-  const kinds = value.kinds;
-  if (!Array.isArray(kinds))
-    return;
-  const parsed = [];
-  for (const raw of kinds.slice(0, 12)) {
-    if (!raw || typeof raw !== "object")
-      continue;
-    const entry = raw;
-    const kind = entry["kind"];
-    const n = count(entry["count"]);
-    if (typeof kind !== "string" || n === 0)
-      continue;
-    const channels = Array.isArray(entry["channels"]) ? entry["channels"].filter((name) => typeof name === "string").slice(0, 3) : [];
-    const from = Array.isArray(entry["from"]) ? entry["from"].flatMap((sender) => {
-      if (!sender || typeof sender !== "object")
-        return [];
-      const { name, type } = sender;
-      return typeof name === "string" ? [
-        {
-          name,
-          type: type === "human" ? "human" : "agent"
-        }
-      ] : [];
-    }).slice(0, 3) : [];
-    parsed.push({
-      kind: kind.slice(0, 32),
-      count: n,
-      channels,
-      more_channels: count(entry["more_channels"]),
-      from,
-      more_from: count(entry["more_from"])
-    });
-  }
-  if (parsed.length === 0)
-    return;
-  return {
-    total: count(value.total) || parsed.reduce((sum, k) => sum + k.count, 0),
-    kinds: parsed
-  };
-}
-
-class WakeClient {
-  options;
-  fetchImpl;
-  constructor(options = {}) {
-    this.options = options;
-    this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
-  }
-  async check(url, token, since, timeoutMs, signal, wait = 0) {
-    const controller = new AbortController;
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const onAbort = () => controller.abort();
-    signal?.addEventListener("abort", onAbort);
-    try {
-      const response = await this.fetchImpl(wakeUrl(url, since, wait), {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/json",
-          "user-agent": this.options.userAgent ?? "harnessim-claude-code-plugin",
-          ...this.options.headers
-        },
-        signal: controller.signal
-      });
-      if (!response.ok) {
-        let code;
-        try {
-          const body = await response.json();
-          code = body.error?.code;
-        } catch {
-          code = undefined;
-        }
-        const retry = Number(response.headers.get("retry-after"));
-        throw new HttpError(response.status, code, `HTTP ${response.status}${code ? ` ${code}` : ""}`, Number.isFinite(retry) && retry > 0 ? retry : undefined);
-      }
-      const body = await response.json();
-      if (typeof body.new !== "boolean" || body.since !== null && typeof body.since !== "string") {
-        throw new HttpError(502, "bad_answer", "GET /wake answered something other than { new, since }");
-      }
-      const waiting = body.new ? parseWaiting(body.waiting) : undefined;
-      const update = body.plugin_update;
-      const tools = body.tools_update;
-      return {
-        new: body.new,
-        since: body.since,
-        ...waiting === undefined ? {} : { waiting },
-        ...typeof update === "string" && update.trim() !== "" ? { pluginUpdate: oneLine(update, 200) } : {},
-        ...typeof tools === "string" && tools.trim() !== "" ? { toolsUpdate: oneLine(tools, 200) } : {},
-        ...response.headers.get(WAKE_HOLD_RESPONSE_HEADER) === null ? {} : { held: true }
-      };
-    } catch (error) {
-      if (controller.signal.aborted && !(error instanceof HttpError)) {
-        const timeout = new Error(`timed out after ${timeoutMs} ms`);
-        timeout.name = "TimeoutError";
-        throw timeout;
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-    }
-  }
-}
-
-var PLUGIN_NAME = "harnessim";
-var CHANNEL_SERVER = "im-live";
-var VERSION = "0.14.1";
-var PLUGIN_HEADER = "X-HarnessIM-Plugin";
-var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
-function loadDepsConfig(deps) {
-  return loadConfig(deps.env);
-}
-function wakeClient(deps) {
-  return new WakeClient({
-    ...deps.fetch ? { fetch: deps.fetch } : {},
-    userAgent: `harnessim-claude-code-plugin/${VERSION}`,
-    headers: { [PLUGIN_HEADER]: VERSION }
-  });
-}
-async function withDeadline(ms, fallback, run) {
-  const controller = new AbortController;
-  let timer;
-  const deadline = new Promise((resolve) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      resolve(fallback);
-    }, ms);
-  });
-  try {
-    return await Promise.race([
-      run(controller.signal).catch(() => fallback),
-      deadline
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-import { dirname, join as join3, parse } from "node:path";
+import { join as join3 } from "node:path";
 
 import {
   chmodSync,
@@ -526,12 +376,255 @@ function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
   return removed;
 }
 
-var PROJECT_FILE = join3(".claude", "harnessim.json");
+import { mkdirSync as mkdirSync2 } from "node:fs";
+var HEARTBEAT_MS = 1e4;
+var HEARTBEAT_STALE_MS = 35000;
+function heartbeatPath(dataDir, sessionId) {
+  return join3(sessionDir(dataDir, sessionId), "channel.json");
+}
+function writeHeartbeat(dataDir, sessionId, beat) {
+  mkdirSync2(sessionDir(dataDir, sessionId), { recursive: true });
+  writeJsonAtomic(heartbeatPath(dataDir, sessionId), beat);
+}
+function channelActive(dataDir, sessionId, now, alive, read = (p) => readJson(p)) {
+  const beat = read(heartbeatPath(dataDir, sessionId));
+  if (!beat)
+    return false;
+  const at = Date.parse(beat.beatAt);
+  if (!Number.isFinite(at) || now - at > HEARTBEAT_STALE_MS)
+    return false;
+  return alive(beat.pid);
+}
+var CHANNEL_FLAGS = ["--channels", "--dangerously-load-development-channels"];
+function channelFlagNames(argv) {
+  const entries = [];
+  for (let i = 0;i < argv.length; i += 1) {
+    const arg = argv[i] ?? "";
+    const flag = CHANNEL_FLAGS.find((f) => arg === f || arg.startsWith(`${f}=`));
+    if (!flag)
+      continue;
+    const values = [];
+    if (arg.startsWith(`${flag}=`))
+      values.push(arg.slice(flag.length + 1));
+    else {
+      for (let j = i + 1;j < argv.length; j += 1) {
+        const next = argv[j] ?? "";
+        if (next.startsWith("-"))
+          break;
+        if (!/^(plugin|server):/.test(next))
+          break;
+        values.push(next);
+        i = j;
+      }
+    }
+    for (const value of values)
+      entries.push(...value.split(",").map((v) => v.trim()).filter(Boolean));
+  }
+  return entries;
+}
+function optsInPlugin(argv, plugin, server) {
+  return channelFlagNames(argv).some((entry) => entry === `plugin:${plugin}` || entry.startsWith(`plugin:${plugin}@`) || entry === `server:${server}` || entry === `server:plugin:${plugin}:${server}`);
+}
+function decideChannel(input) {
+  const o = input.override?.trim().toLowerCase();
+  if (o === "on" || o === "1" || o === "true")
+    return { active: true, how: "env HARNESSIM_CHANNEL=on" };
+  if (o === "off" || o === "0" || o === "false")
+    return { active: false, how: "env HARNESSIM_CHANNEL=off" };
+  const caps = input.clientCapabilities;
+  if (caps?.experimental && "claude/channel" in caps.experimental) {
+    return { active: true, how: "client capability claude/channel" };
+  }
+  if (optsInPlugin(input.claudeArgv, input.plugin, input.server)) {
+    return { active: true, how: "Claude Code argv opts the plugin in" };
+  }
+  return {
+    active: false,
+    how: "not opted in (no channel flag naming this plugin)"
+  };
+}
+function channelEventsReach(input) {
+  const flag = (value) => {
+    const v = value?.trim().toLowerCase();
+    if (v === "on" || v === "1" || v === "true")
+      return true;
+    if (v === "off" || v === "0" || v === "false")
+      return false;
+    return;
+  };
+  const events = flag(input.override);
+  if (events !== undefined)
+    return events;
+  if (flag(input.channelOverride) === true)
+    return true;
+  return channelFlagNames(input.claudeArgv).some((entry) => entry === `plugin:${input.plugin}` || entry.startsWith(`plugin:${input.plugin}@`) || entry === `server:${input.server}` || entry === `server:plugin:${input.plugin}:${input.server}` || entry.toLowerCase() === "server:harnessim");
+}
+var CHANNEL_EVENT_KINDS = [
+  "dm",
+  "mention",
+  "thread_reply",
+  "broadcast",
+  "reminder",
+  "question"
+];
+
+function wakeUrl(base, since, wait = 0) {
+  const query = [
+    ...since === null ? [] : [`since=${encodeURIComponent(since)}`],
+    ...wait > 0 ? [`wait=${String(wait)}`] : []
+  ];
+  return query.length === 0 ? base : `${base}?${query.join("&")}`;
+}
+var WAKE_HOLD_RESPONSE_HEADER = "harnessim-wake-hold";
+var count = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+function parseWaiting(value) {
+  if (!value || typeof value !== "object")
+    return;
+  const kinds = value.kinds;
+  if (!Array.isArray(kinds))
+    return;
+  const parsed = [];
+  for (const raw of kinds.slice(0, 12)) {
+    if (!raw || typeof raw !== "object")
+      continue;
+    const entry = raw;
+    const kind = entry["kind"];
+    const n = count(entry["count"]);
+    if (typeof kind !== "string" || n === 0)
+      continue;
+    const channels = Array.isArray(entry["channels"]) ? entry["channels"].filter((name) => typeof name === "string").slice(0, 3) : [];
+    const from = Array.isArray(entry["from"]) ? entry["from"].flatMap((sender) => {
+      if (!sender || typeof sender !== "object")
+        return [];
+      const { name, type } = sender;
+      return typeof name === "string" ? [
+        {
+          name,
+          type: type === "human" ? "human" : "agent"
+        }
+      ] : [];
+    }).slice(0, 3) : [];
+    parsed.push({
+      kind: kind.slice(0, 32),
+      count: n,
+      channels,
+      more_channels: count(entry["more_channels"]),
+      from,
+      more_from: count(entry["more_from"])
+    });
+  }
+  if (parsed.length === 0)
+    return;
+  return {
+    total: count(value.total) || parsed.reduce((sum, k) => sum + k.count, 0),
+    kinds: parsed
+  };
+}
+
+class WakeClient {
+  options;
+  fetchImpl;
+  constructor(options = {}) {
+    this.options = options;
+    this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
+  }
+  async check(url, token, since, timeoutMs, signal, wait = 0) {
+    const controller = new AbortController;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort);
+    try {
+      const response = await this.fetchImpl(wakeUrl(url, since, wait), {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/json",
+          "user-agent": this.options.userAgent ?? "harnessim-claude-code-plugin",
+          ...this.options.headers
+        },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        let code;
+        try {
+          const body2 = await response.json();
+          code = body2.error?.code;
+        } catch {
+          code = undefined;
+        }
+        const retry = Number(response.headers.get("retry-after"));
+        throw new HttpError(response.status, code, `HTTP ${response.status}${code ? ` ${code}` : ""}`, Number.isFinite(retry) && retry > 0 ? retry : undefined);
+      }
+      const body = await response.json();
+      if (typeof body.new !== "boolean" || body.since !== null && typeof body.since !== "string") {
+        throw new HttpError(502, "bad_answer", "GET /wake answered something other than { new, since }");
+      }
+      const waiting = body.new ? parseWaiting(body.waiting) : undefined;
+      const update = body.plugin_update;
+      const tools = body.tools_update;
+      return {
+        new: body.new,
+        since: body.since,
+        ...waiting === undefined ? {} : { waiting },
+        ...typeof update === "string" && update.trim() !== "" ? { pluginUpdate: oneLine(update, 200) } : {},
+        ...typeof tools === "string" && tools.trim() !== "" ? { toolsUpdate: oneLine(tools, 200) } : {},
+        ...response.headers.get(WAKE_HOLD_RESPONSE_HEADER) === null ? {} : { held: true }
+      };
+    } catch (error) {
+      if (controller.signal.aborted && !(error instanceof HttpError)) {
+        const timeout = new Error(`timed out after ${timeoutMs} ms`);
+        timeout.name = "TimeoutError";
+        throw timeout;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
+var PLUGIN_NAME = "harnessim";
+var CHANNEL_SERVER = "im-live";
+var VERSION = "0.14.4";
+var PLUGIN_HEADER = "X-HarnessIM-Plugin";
+var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+function loadDepsConfig(deps) {
+  return loadConfig(deps.env);
+}
+function wakeClient(deps) {
+  return new WakeClient({
+    ...deps.fetch ? { fetch: deps.fetch } : {},
+    userAgent: `harnessim-claude-code-plugin/${VERSION}`,
+    headers: { [PLUGIN_HEADER]: VERSION }
+  });
+}
+async function withDeadline(ms, fallback, run) {
+  const controller = new AbortController;
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(fallback);
+    }, ms);
+  });
+  try {
+    return await Promise.race([
+      run(controller.signal).catch(() => fallback),
+      deadline
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+import { dirname, join as join4, parse } from "node:path";
+var PROJECT_FILE = join4(".claude", "harnessim.json");
 function findProjectFile(cwd, read = (p) => readJson(p)) {
   let dir = cwd;
   const root = parse(cwd).root;
   for (let depth = 0;depth < 64; depth += 1) {
-    const path = join3(dir, PROJECT_FILE);
+    const path = join4(dir, PROJECT_FILE);
     const file = read(path);
     if (file && typeof file === "object")
       return { path, file };
@@ -719,6 +812,19 @@ function noteWakeAnswered(deps, sessionId, tier, nowMs) {
     }, now);
   } catch {}
 }
+function withoutChannelCovered(waiting) {
+  if (waiting === undefined || waiting.kinds.length === 0)
+    return waiting;
+  const kinds = waiting.kinds.filter((entry) => !CHANNEL_EVENT_KINDS.includes(entry.kind));
+  if (kinds.length === 0)
+    return null;
+  if (kinds.length === waiting.kinds.length)
+    return waiting;
+  return {
+    total: kinds.reduce((sum, entry) => sum + entry.count, 0),
+    kinds
+  };
+}
 async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
   const state = loadState(deps.dataDir, sessionId, new Date(deps.now?.() ?? Date.now()));
   const wake = state.wake;
@@ -746,12 +852,18 @@ async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
   const held = answer.held === true ? { held: true } : {};
   const toolsLine = answer.toolsUpdate === undefined ? undefined : claimToolsUpdate(deps.dataDir, sessionId, answer.toolsUpdate, new Date(nowMs));
   const tools = toolsLine === undefined ? {} : { toolsUpdate: toolsLine };
-  return claimWake(deps.dataDir, sessionId, wake.token, { new: answer.new, since: answer.since }, tier) ? {
+  if (!claimWake(deps.dataDir, sessionId, wake.token, { new: answer.new, since: answer.since }, tier)) {
+    return { kind: "quiet", ...held, ...tools };
+  }
+  const waiting = deps.channelEvents?.() === true ? withoutChannelCovered(answer.waiting) : answer.waiting;
+  if (waiting === null)
+    return { kind: "quiet", ...held, ...tools };
+  return {
     kind: "wake",
-    notice: wakeNotice(state.identity, answer.waiting),
+    notice: wakeNotice(state.identity, waiting),
     ...held,
     ...tools
-  } : { kind: "quiet", ...held, ...tools };
+  };
 }
 async function probeWake(deps, sessionId, timeoutMs) {
   const wake = loadState(deps.dataDir, sessionId).wake;
@@ -826,7 +938,7 @@ function withUrl(grant) {
 }
 
 import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
-import { dirname as dirname2, join as join4, resolve } from "node:path";
+import { dirname as dirname2, join as join5, resolve } from "node:path";
 var HARNESSIM_URL = /^https?:\/\/(?:[a-z0-9-]+\.)*harnessim\.com(?::\d+)?(?:\/|$)/i;
 function isHarnessimServer(name, entry) {
   if (name.toLowerCase() === "harnessim")
@@ -862,7 +974,7 @@ function upFrom(cwd) {
 }
 function claudeJsonPath(env, home) {
   const dir = env.CLAUDE_CONFIG_DIR?.trim();
-  return join4(dir ? dir : home, ".claude.json");
+  return join5(dir ? dir : home, ".claude.json");
 }
 function findHandAddedServers(env, home, cwd) {
   const found = [];
@@ -876,7 +988,7 @@ function findHandAddedServers(env, home, cwd) {
     for (const [name, entry] of serversIn(project))
       if (isHarnessimServer(name, entry))
         found.push({ name, scope: "local", dir });
-    for (const [name, entry] of serversIn(readJson2(join4(dir, ".mcp.json"))))
+    for (const [name, entry] of serversIn(readJson2(join5(dir, ".mcp.json"))))
       if (isHarnessimServer(name, entry))
         found.push({ name, scope: "project", dir });
   }
@@ -904,13 +1016,13 @@ function boundOnHandAddedNotice(toolName, found) {
 }
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync3 } from "node:fs";
-import { join as join5 } from "node:path";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync3 } from "node:fs";
+import { join as join6 } from "node:path";
 function pointerPath(dataDir, pid) {
-  return join5(dataDir, "by-pid", `${pid}.json`);
+  return join6(dataDir, "by-pid", `${pid}.json`);
 }
 function writePointer(dataDir, pid, sessionId, source, now = new Date) {
-  mkdirSync2(join5(dataDir, "by-pid"), { recursive: true });
+  mkdirSync3(join6(dataDir, "by-pid"), { recursive: true });
   writeJsonAtomic(pointerPath(dataDir, pid), { sessionId, at: now.toISOString(), source });
 }
 function parentPid(pid) {
@@ -950,10 +1062,10 @@ function claudePid(env, chain) {
 function resolveSessionId(env, dataDir, chain, read = (p) => readJson(p)) {
   const envPid = Number(env.CLAUDE_PID);
   const candidates = Number.isFinite(envPid) && envPid > 1 ? [envPid, ...chain] : [...chain];
-  for (const pid of candidates) {
-    const pointer = read(pointerPath(dataDir, pid));
+  for (const pid2 of candidates) {
+    const pointer = read(pointerPath(dataDir, pid2));
     if (pointer?.sessionId)
-      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid };
+      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid2 };
   }
   const fromEnv = env.CLAUDE_CODE_SESSION_ID?.trim();
   const pid = claudePid(env, chain);
@@ -1103,11 +1215,22 @@ function parseJson(text) {
 }
 function depsFromProcess(argv = process.argv.slice(2), cwd) {
   const env = process.env;
+  let reach;
   return {
     env,
     home: homedir2(),
     dataDir: resolveDataDir(env, argv, homedir2()),
-    cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd()
+    cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd(),
+    channelEvents: () => {
+      reach ??= channelEventsReach({
+        override: env.HARNESSIM_CHANNEL_EVENTS,
+        channelOverride: env.HARNESSIM_CHANNEL,
+        claudeArgv: processArgv(claudePid(env, ancestors(process.ppid)) ?? process.ppid),
+        plugin: PLUGIN_NAME,
+        server: "im"
+      });
+      return reach;
+    }
   };
 }
 async function runHook(fn) {

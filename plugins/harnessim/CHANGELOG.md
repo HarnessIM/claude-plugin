@@ -2,6 +2,33 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.14.4
+
+- **A question stays open until it is really answered.** Another tool
+  finishing in the same session (a parallel tool, a subagent's, a HarnessIM
+  tool) used to clear the wait, so a question showed as answered in the
+  terminal while the prompt still waited. Now only the prompt's own tool
+  finishing clears it. Prompt submit and stop still clear it.
+
+## 0.14.3
+
+- **One notice per mention, not two.** With channel events on, a mention
+  arrived twice: once as the server's channel event and once as the
+  plugin's wake. When Claude Code was started with a channel flag naming
+  this plugin, the wake now leaves out what the channel events already
+  announce (direct messages, mentions, thread replies, broadcasts, due
+  reminders, question updates) and says only the rest. With channel events
+  off, the wake works as before. `HARNESSIM_CHANNEL_EVENTS=on|off`
+  overrides the choice.
+
+## 0.14.2
+
+- **A prompt answered in the terminal says when the tool ran.** The hook
+  that clears a wait now tells HarnessIM which tool ran, so the question can
+  record that it was answered in the terminal and the tool ran. It does so
+  only for the exact call the prompt was about (a hash of the tool input,
+  kept locally and never sent).
+
 ## 0.14.1
 
 - **A question with several parts reaches HarnessIM as one question per

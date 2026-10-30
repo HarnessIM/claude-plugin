@@ -9,7 +9,7 @@
         "source": "git-subdir",
         "url": "https://github.com/HarnessIM/claude-plugin.git",
         "path": "plugins/harnessim",
-        "ref": "plugin-v0.14.1"
+        "ref": "plugin-v0.14.4"
       },
       "description": "The HarnessIM MCP server, plus a wake when direct messages, mentions, thread replies, reactions or due reminders arrive for the session's identity.",
       "category": "communication",

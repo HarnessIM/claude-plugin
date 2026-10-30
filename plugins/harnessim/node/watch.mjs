@@ -174,6 +174,258 @@ function wakeNotice(identity, waiting) {
   return { identity: who, text: wakeNoticeText(who, waiting) };
 }
 
+import { join as join2 } from "node:path";
+
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from "node:fs";
+import { join } from "node:path";
+var LOCK_STALE_MS = 5000;
+var LOCK_WAIT_MS = 1500;
+function sanitizeId(value) {
+  return value.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 128) || "unknown";
+}
+function sessionDir(dataDir, sessionId) {
+  return join(dataDir, "sessions", sanitizeId(sessionId));
+}
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return;
+  }
+}
+function writeJsonAtomic(path, value, mode = 384) {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+`, { mode });
+  chmodSync(tmp, mode);
+  renameSync(tmp, path);
+}
+function busyWait(ms) {
+  const shared = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(shared, 0, 0, ms);
+}
+function withLock(dir, fn, now = Date.now) {
+  mkdirSync(dir, { recursive: true });
+  const lock = join(dir, "state.lock");
+  const deadline = now() + LOCK_WAIT_MS;
+  for (;; ) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch {
+      try {
+        if (now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
+          rmdirSync(lock);
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (now() > deadline)
+        throw new Error("state lock busy");
+      busyWait(15);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      rmdirSync(lock);
+    } catch {}
+  }
+}
+function loadState(dataDir, sessionId, now = new Date) {
+  const existing = readJson(join(sessionDir(dataDir, sessionId), "state.json"));
+  if (existing && existing.sessionId === sessionId)
+    return existing;
+  const at = now.toISOString();
+  return { sessionId, createdAt: at, updatedAt: at };
+}
+function saveState(dataDir, state, now = new Date) {
+  const dir = sessionDir(dataDir, state.sessionId);
+  mkdirSync(dir, { recursive: true });
+  writeJsonAtomic(join(dir, "state.json"), {
+    ...state,
+    updatedAt: now.toISOString()
+  });
+}
+function updateState(dataDir, sessionId, fn, now = new Date) {
+  return withLock(sessionDir(dataDir, sessionId), () => {
+    const state = loadState(dataDir, sessionId, now);
+    const result = fn(state);
+    saveState(dataDir, state, now);
+    return result;
+  });
+}
+function claimWake(dataDir, sessionId, token, answer, tier, now = new Date) {
+  return updateState(dataDir, sessionId, (state) => {
+    const wake = state.wake;
+    if (!wake || wake.token !== token)
+      return false;
+    if (wake.dead) {
+      delete wake.dead;
+      delete wake.deadAt;
+      if (state.identityLost?.via === "wake_refused")
+        delete state.identityLost;
+    }
+    const before = wake.since;
+    wake.since = answer.since;
+    const deliver = answer.new && answer.since !== before;
+    if (deliver)
+      state.lastTier = tier;
+    return deliver;
+  }, now);
+}
+function markWakeDead(dataDir, sessionId, token, now = new Date) {
+  updateState(dataDir, sessionId, (state) => {
+    if (state.wake?.token === token && !state.wake.dead) {
+      state.wake.dead = true;
+      state.wake.deadAt = now.toISOString();
+    }
+  }, now);
+}
+function forgetWakeUrl(dataDir, sessionId, token, now = new Date) {
+  updateState(dataDir, sessionId, (state) => {
+    if (state.wake?.token === token)
+      delete state.wake.url;
+  }, now);
+}
+function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
+  const root = join(dataDir, "sessions");
+  const removed = [];
+  if (!existsSync(root))
+    return removed;
+  for (const name of readdirSync(root)) {
+    if (name === sanitizeId(keep))
+      continue;
+    const dir = join(root, name);
+    try {
+      const state = statSync(join(dir, "state.json"), {
+        throwIfNoEntry: false
+      });
+      const mtime = state?.mtimeMs ?? statSync(dir).mtimeMs;
+      if (now - mtime > maxAgeMs) {
+        rmSync(dir, { recursive: true, force: true });
+        removed.push(name);
+      }
+    } catch {}
+  }
+  const pids = join(dataDir, "by-pid");
+  if (existsSync(pids)) {
+    for (const name of readdirSync(pids)) {
+      const file = join(pids, name);
+      try {
+        if (now - statSync(file).mtimeMs > maxAgeMs)
+          rmSync(file, { force: true });
+      } catch {}
+    }
+  }
+  return removed;
+}
+
+import { mkdirSync as mkdirSync2 } from "node:fs";
+var HEARTBEAT_MS = 1e4;
+var HEARTBEAT_STALE_MS = 35000;
+function heartbeatPath(dataDir, sessionId) {
+  return join2(sessionDir(dataDir, sessionId), "channel.json");
+}
+function writeHeartbeat(dataDir, sessionId, beat) {
+  mkdirSync2(sessionDir(dataDir, sessionId), { recursive: true });
+  writeJsonAtomic(heartbeatPath(dataDir, sessionId), beat);
+}
+function channelActive(dataDir, sessionId, now, alive, read = (p) => readJson(p)) {
+  const beat = read(heartbeatPath(dataDir, sessionId));
+  if (!beat)
+    return false;
+  const at = Date.parse(beat.beatAt);
+  if (!Number.isFinite(at) || now - at > HEARTBEAT_STALE_MS)
+    return false;
+  return alive(beat.pid);
+}
+var CHANNEL_FLAGS = ["--channels", "--dangerously-load-development-channels"];
+function channelFlagNames(argv) {
+  const entries = [];
+  for (let i = 0;i < argv.length; i += 1) {
+    const arg = argv[i] ?? "";
+    const flag = CHANNEL_FLAGS.find((f) => arg === f || arg.startsWith(`${f}=`));
+    if (!flag)
+      continue;
+    const values = [];
+    if (arg.startsWith(`${flag}=`))
+      values.push(arg.slice(flag.length + 1));
+    else {
+      for (let j = i + 1;j < argv.length; j += 1) {
+        const next = argv[j] ?? "";
+        if (next.startsWith("-"))
+          break;
+        if (!/^(plugin|server):/.test(next))
+          break;
+        values.push(next);
+        i = j;
+      }
+    }
+    for (const value of values)
+      entries.push(...value.split(",").map((v) => v.trim()).filter(Boolean));
+  }
+  return entries;
+}
+function optsInPlugin(argv, plugin, server) {
+  return channelFlagNames(argv).some((entry) => entry === `plugin:${plugin}` || entry.startsWith(`plugin:${plugin}@`) || entry === `server:${server}` || entry === `server:plugin:${plugin}:${server}`);
+}
+function decideChannel(input) {
+  const o = input.override?.trim().toLowerCase();
+  if (o === "on" || o === "1" || o === "true")
+    return { active: true, how: "env HARNESSIM_CHANNEL=on" };
+  if (o === "off" || o === "0" || o === "false")
+    return { active: false, how: "env HARNESSIM_CHANNEL=off" };
+  const caps = input.clientCapabilities;
+  if (caps?.experimental && "claude/channel" in caps.experimental) {
+    return { active: true, how: "client capability claude/channel" };
+  }
+  if (optsInPlugin(input.claudeArgv, input.plugin, input.server)) {
+    return { active: true, how: "Claude Code argv opts the plugin in" };
+  }
+  return {
+    active: false,
+    how: "not opted in (no channel flag naming this plugin)"
+  };
+}
+function channelEventsReach(input) {
+  const flag = (value) => {
+    const v = value?.trim().toLowerCase();
+    if (v === "on" || v === "1" || v === "true")
+      return true;
+    if (v === "off" || v === "0" || v === "false")
+      return false;
+    return;
+  };
+  const events = flag(input.override);
+  if (events !== undefined)
+    return events;
+  if (flag(input.channelOverride) === true)
+    return true;
+  return channelFlagNames(input.claudeArgv).some((entry) => entry === `plugin:${input.plugin}` || entry.startsWith(`plugin:${input.plugin}@`) || entry === `server:${input.server}` || entry === `server:plugin:${input.plugin}:${input.server}` || entry.toLowerCase() === "server:harnessim");
+}
+var CHANNEL_EVENT_KINDS = [
+  "dm",
+  "mention",
+  "thread_reply",
+  "broadcast",
+  "reminder",
+  "question"
+];
+
 function wakeUrl(base, since, wait = 0) {
   const query = [
     ...since === null ? [] : [`since=${encodeURIComponent(since)}`],
@@ -253,8 +505,8 @@ class WakeClient {
       if (!response.ok) {
         let code;
         try {
-          const body = await response.json();
-          code = body.error?.code;
+          const body2 = await response.json();
+          code = body2.error?.code;
         } catch {
           code = undefined;
         }
@@ -290,8 +542,8 @@ class WakeClient {
   }
 }
 
-import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync as existsSync2, unlinkSync } from "node:fs";
+import { join as join3 } from "node:path";
 var DEFAULT_BASE_URL = "https://agents.harnessim.com";
 var HOLD_SECONDS_MAX = 50;
 function clean(value) {
@@ -316,23 +568,23 @@ function loadConfig(env) {
   };
 }
 function legacyCredentialsPath(dataDir) {
-  return join(dataDir, "credentials.json");
+  return join3(dataDir, "credentials.json");
 }
 function removeLegacyCredentials(dataDir) {
   const path = legacyCredentialsPath(dataDir);
-  if (!existsSync(path))
+  if (!existsSync2(path))
     return false;
   unlinkSync(path);
   return true;
 }
 function resolveDataDir(env, argv, home) {
   const fromArg = clean(argv[0]);
-  return clean(env.CLAUDE_PLUGIN_DATA) ?? fromArg ?? join(home, ".claude", "plugins", "data", "harnessim-harnessim");
+  return clean(env.CLAUDE_PLUGIN_DATA) ?? fromArg ?? join3(home, ".claude", "plugins", "data", "harnessim-harnessim");
 }
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.14.1";
+var VERSION = "0.14.4";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -364,172 +616,13 @@ async function withDeadline(ms, fallback, run) {
   }
 }
 
-import { dirname, join as join3, parse } from "node:path";
-
-import {
-  chmodSync,
-  existsSync as existsSync2,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmdirSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from "node:fs";
-import { join as join2 } from "node:path";
-var LOCK_STALE_MS = 5000;
-var LOCK_WAIT_MS = 1500;
-function sanitizeId(value) {
-  return value.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 128) || "unknown";
-}
-function sessionDir(dataDir, sessionId) {
-  return join2(dataDir, "sessions", sanitizeId(sessionId));
-}
-function readJson(path) {
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return;
-  }
-}
-function writeJsonAtomic(path, value, mode = 384) {
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
-`, { mode });
-  chmodSync(tmp, mode);
-  renameSync(tmp, path);
-}
-function busyWait(ms) {
-  const shared = new Int32Array(new SharedArrayBuffer(4));
-  Atomics.wait(shared, 0, 0, ms);
-}
-function withLock(dir, fn, now = Date.now) {
-  mkdirSync(dir, { recursive: true });
-  const lock = join2(dir, "state.lock");
-  const deadline = now() + LOCK_WAIT_MS;
-  for (;; ) {
-    try {
-      mkdirSync(lock);
-      break;
-    } catch {
-      try {
-        if (now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
-          rmdirSync(lock);
-          continue;
-        }
-      } catch {
-        continue;
-      }
-      if (now() > deadline)
-        throw new Error("state lock busy");
-      busyWait(15);
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    try {
-      rmdirSync(lock);
-    } catch {}
-  }
-}
-function loadState(dataDir, sessionId, now = new Date) {
-  const existing = readJson(join2(sessionDir(dataDir, sessionId), "state.json"));
-  if (existing && existing.sessionId === sessionId)
-    return existing;
-  const at = now.toISOString();
-  return { sessionId, createdAt: at, updatedAt: at };
-}
-function saveState(dataDir, state, now = new Date) {
-  const dir = sessionDir(dataDir, state.sessionId);
-  mkdirSync(dir, { recursive: true });
-  writeJsonAtomic(join2(dir, "state.json"), {
-    ...state,
-    updatedAt: now.toISOString()
-  });
-}
-function updateState(dataDir, sessionId, fn, now = new Date) {
-  return withLock(sessionDir(dataDir, sessionId), () => {
-    const state = loadState(dataDir, sessionId, now);
-    const result = fn(state);
-    saveState(dataDir, state, now);
-    return result;
-  });
-}
-function claimWake(dataDir, sessionId, token, answer, tier, now = new Date) {
-  return updateState(dataDir, sessionId, (state) => {
-    const wake = state.wake;
-    if (!wake || wake.token !== token)
-      return false;
-    if (wake.dead) {
-      delete wake.dead;
-      delete wake.deadAt;
-      if (state.identityLost?.via === "wake_refused")
-        delete state.identityLost;
-    }
-    const before = wake.since;
-    wake.since = answer.since;
-    const deliver = answer.new && answer.since !== before;
-    if (deliver)
-      state.lastTier = tier;
-    return deliver;
-  }, now);
-}
-function markWakeDead(dataDir, sessionId, token, now = new Date) {
-  updateState(dataDir, sessionId, (state) => {
-    if (state.wake?.token === token && !state.wake.dead) {
-      state.wake.dead = true;
-      state.wake.deadAt = now.toISOString();
-    }
-  }, now);
-}
-function forgetWakeUrl(dataDir, sessionId, token, now = new Date) {
-  updateState(dataDir, sessionId, (state) => {
-    if (state.wake?.token === token)
-      delete state.wake.url;
-  }, now);
-}
-function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
-  const root = join2(dataDir, "sessions");
-  const removed = [];
-  if (!existsSync2(root))
-    return removed;
-  for (const name of readdirSync(root)) {
-    if (name === sanitizeId(keep))
-      continue;
-    const dir = join2(root, name);
-    try {
-      const state = statSync(join2(dir, "state.json"), {
-        throwIfNoEntry: false
-      });
-      const mtime = state?.mtimeMs ?? statSync(dir).mtimeMs;
-      if (now - mtime > maxAgeMs) {
-        rmSync(dir, { recursive: true, force: true });
-        removed.push(name);
-      }
-    } catch {}
-  }
-  const pids = join2(dataDir, "by-pid");
-  if (existsSync2(pids)) {
-    for (const name of readdirSync(pids)) {
-      const file = join2(pids, name);
-      try {
-        if (now - statSync(file).mtimeMs > maxAgeMs)
-          rmSync(file, { force: true });
-      } catch {}
-    }
-  }
-  return removed;
-}
-
-var PROJECT_FILE = join3(".claude", "harnessim.json");
+import { dirname, join as join4, parse } from "node:path";
+var PROJECT_FILE = join4(".claude", "harnessim.json");
 function findProjectFile(cwd, read = (p) => readJson(p)) {
   let dir = cwd;
   const root = parse(cwd).root;
   for (let depth = 0;depth < 64; depth += 1) {
-    const path = join3(dir, PROJECT_FILE);
+    const path = join4(dir, PROJECT_FILE);
     const file = read(path);
     if (file && typeof file === "object")
       return { path, file };
@@ -717,6 +810,19 @@ function noteWakeAnswered(deps, sessionId, tier, nowMs) {
     }, now);
   } catch {}
 }
+function withoutChannelCovered(waiting) {
+  if (waiting === undefined || waiting.kinds.length === 0)
+    return waiting;
+  const kinds = waiting.kinds.filter((entry) => !CHANNEL_EVENT_KINDS.includes(entry.kind));
+  if (kinds.length === 0)
+    return null;
+  if (kinds.length === waiting.kinds.length)
+    return waiting;
+  return {
+    total: kinds.reduce((sum, entry) => sum + entry.count, 0),
+    kinds
+  };
+}
 async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
   const state = loadState(deps.dataDir, sessionId, new Date(deps.now?.() ?? Date.now()));
   const wake = state.wake;
@@ -744,12 +850,18 @@ async function checkWake(deps, sessionId, tier, timeoutMs, signal, wait = 0) {
   const held = answer.held === true ? { held: true } : {};
   const toolsLine = answer.toolsUpdate === undefined ? undefined : claimToolsUpdate(deps.dataDir, sessionId, answer.toolsUpdate, new Date(nowMs));
   const tools = toolsLine === undefined ? {} : { toolsUpdate: toolsLine };
-  return claimWake(deps.dataDir, sessionId, wake.token, { new: answer.new, since: answer.since }, tier) ? {
+  if (!claimWake(deps.dataDir, sessionId, wake.token, { new: answer.new, since: answer.since }, tier)) {
+    return { kind: "quiet", ...held, ...tools };
+  }
+  const waiting = deps.channelEvents?.() === true ? withoutChannelCovered(answer.waiting) : answer.waiting;
+  if (waiting === null)
+    return { kind: "quiet", ...held, ...tools };
+  return {
     kind: "wake",
-    notice: wakeNotice(state.identity, answer.waiting),
+    notice: wakeNotice(state.identity, waiting),
     ...held,
     ...tools
-  } : { kind: "quiet", ...held, ...tools };
+  };
 }
 async function probeWake(deps, sessionId, timeoutMs) {
   const wake = loadState(deps.dataDir, sessionId).wake;
@@ -801,13 +913,13 @@ function claimToolsUpdate(dataDir, sessionId, line, now = new Date) {
 }
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync as mkdirSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join4 } from "node:path";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync2 } from "node:fs";
+import { join as join5 } from "node:path";
 function pointerPath(dataDir, pid) {
-  return join4(dataDir, "by-pid", `${pid}.json`);
+  return join5(dataDir, "by-pid", `${pid}.json`);
 }
 function writePointer(dataDir, pid, sessionId, source, now = new Date) {
-  mkdirSync2(join4(dataDir, "by-pid"), { recursive: true });
+  mkdirSync3(join5(dataDir, "by-pid"), { recursive: true });
   writeJsonAtomic(pointerPath(dataDir, pid), { sessionId, at: now.toISOString(), source });
 }
 function parentPid(pid) {
@@ -847,10 +959,10 @@ function claudePid(env, chain) {
 function resolveSessionId(env, dataDir, chain, read = (p) => readJson(p)) {
   const envPid = Number(env.CLAUDE_PID);
   const candidates = Number.isFinite(envPid) && envPid > 1 ? [envPid, ...chain] : [...chain];
-  for (const pid of candidates) {
-    const pointer = read(pointerPath(dataDir, pid));
+  for (const pid2 of candidates) {
+    const pointer = read(pointerPath(dataDir, pid2));
     if (pointer?.sessionId)
-      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid };
+      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid2 };
   }
   const fromEnv = env.CLAUDE_CODE_SESSION_ID?.trim();
   const pid = claudePid(env, chain);
@@ -997,9 +1109,9 @@ async function runLoop(deps) {
         down = true;
         notify(downNotice(downReason(cls)));
       }
-      const wait = backoff.fail();
+      const wait2 = backoff.fail();
       const asked = error instanceof HttpError && error.retryAfterSeconds !== undefined ? error.retryAfterSeconds * 1000 : 0;
-      await deps.sleep(Math.max(wait, asked), deps.signal);
+      await deps.sleep(Math.max(wait2, asked), deps.signal);
       continue;
     }
     backoff.succeed();
@@ -1057,72 +1169,6 @@ function abortableSleep(ms, signal) {
 
 import { appendFileSync } from "node:fs";
 
-import { join as join5 } from "node:path";
-import { mkdirSync as mkdirSync3 } from "node:fs";
-var HEARTBEAT_MS = 1e4;
-var HEARTBEAT_STALE_MS = 35000;
-function heartbeatPath(dataDir, sessionId) {
-  return join5(sessionDir(dataDir, sessionId), "channel.json");
-}
-function writeHeartbeat(dataDir, sessionId, beat) {
-  mkdirSync3(sessionDir(dataDir, sessionId), { recursive: true });
-  writeJsonAtomic(heartbeatPath(dataDir, sessionId), beat);
-}
-function channelActive(dataDir, sessionId, now, alive, read = (p) => readJson(p)) {
-  const beat = read(heartbeatPath(dataDir, sessionId));
-  if (!beat)
-    return false;
-  const at = Date.parse(beat.beatAt);
-  if (!Number.isFinite(at) || now - at > HEARTBEAT_STALE_MS)
-    return false;
-  return alive(beat.pid);
-}
-var CHANNEL_FLAGS = ["--channels", "--dangerously-load-development-channels"];
-function channelFlagNames(argv) {
-  const entries = [];
-  for (let i = 0;i < argv.length; i += 1) {
-    const arg = argv[i] ?? "";
-    const flag = CHANNEL_FLAGS.find((f) => arg === f || arg.startsWith(`${f}=`));
-    if (!flag)
-      continue;
-    const values = [];
-    if (arg.startsWith(`${flag}=`))
-      values.push(arg.slice(flag.length + 1));
-    else {
-      for (let j = i + 1;j < argv.length; j += 1) {
-        const next = argv[j] ?? "";
-        if (next.startsWith("-"))
-          break;
-        if (!/^(plugin|server):/.test(next))
-          break;
-        values.push(next);
-        i = j;
-      }
-    }
-    for (const value of values)
-      entries.push(...value.split(",").map((v) => v.trim()).filter(Boolean));
-  }
-  return entries;
-}
-function optsInPlugin(argv, plugin, server) {
-  return channelFlagNames(argv).some((entry) => entry === `plugin:${plugin}` || entry.startsWith(`plugin:${plugin}@`) || entry === `server:${server}` || entry === `server:plugin:${plugin}:${server}`);
-}
-function decideChannel(input) {
-  const o = input.override?.trim().toLowerCase();
-  if (o === "on" || o === "1" || o === "true")
-    return { active: true, how: "env HARNESSIM_CHANNEL=on" };
-  if (o === "off" || o === "0" || o === "false")
-    return { active: false, how: "env HARNESSIM_CHANNEL=off" };
-  const caps = input.clientCapabilities;
-  if (caps?.experimental && "claude/channel" in caps.experimental) {
-    return { active: true, how: "client capability claude/channel" };
-  }
-  if (optsInPlugin(input.claudeArgv, input.plugin, input.server)) {
-    return { active: true, how: "Claude Code argv opts the plugin in" };
-  }
-  return { active: false, how: "not opted in (no channel flag naming this plugin)" };
-}
-
 import { homedir } from "node:os";
 async function readStdin(limit = 1e6) {
   if (process.stdin.isTTY)
@@ -1147,11 +1193,22 @@ function parseJson(text) {
 }
 function depsFromProcess(argv = process.argv.slice(2), cwd) {
   const env = process.env;
+  let reach;
   return {
     env,
     home: homedir(),
     dataDir: resolveDataDir(env, argv, homedir()),
-    cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd()
+    cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd(),
+    channelEvents: () => {
+      reach ??= channelEventsReach({
+        override: env.HARNESSIM_CHANNEL_EVENTS,
+        channelOverride: env.HARNESSIM_CHANNEL,
+        claudeArgv: processArgv(claudePid(env, ancestors(process.ppid)) ?? process.ppid),
+        plugin: PLUGIN_NAME,
+        server: "im"
+      });
+      return reach;
+    }
   };
 }
 async function runHook(fn) {

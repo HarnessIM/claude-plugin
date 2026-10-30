@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync as rmSync2 } from "node:fs";
 import { hostname } from "node:os";
 import { basename, isAbsolute, join as join3, relative, resolve, sep } from "node:path";
@@ -389,8 +389,8 @@ class WakeClient {
       if (!response.ok) {
         let code;
         try {
-          const body = await response.json();
-          code = body.error?.code;
+          const body2 = await response.json();
+          code = body2.error?.code;
         } catch {
           code = undefined;
         }
@@ -468,7 +468,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.14.1";
+var VERSION = "0.14.4";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -667,6 +667,10 @@ var DECISION_POLL_MS = 3000;
 var LOCAL_POLL_MS = 1000;
 var DECISION_BUDGET_MS = 5000;
 var MIN_ANSWER_S = 15;
+function callHash(toolInput) {
+  const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, inner]) => [key, canonical(inner)])) : value;
+  return createHash("sha256").update(JSON.stringify(canonical(toolInput) ?? null)).digest("hex").slice(0, 16);
+}
 var waitingDir = (dataDir) => join3(dataDir, "waiting");
 var waitingPath = (dataDir, sessionId) => join3(waitingDir(dataDir), `${sanitizeId(sessionId)}.json`);
 function redact(text) {
@@ -715,8 +719,8 @@ function writeWaiting(dataDir, sessionId, file) {
   mkdirSync2(waitingDir(dataDir), { recursive: true, mode: 448 });
   writeJsonAtomic(waitingPath(dataDir, sessionId), file);
 }
-function waitingUrl(deps, wakeUrl) {
-  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function waitingUrl(deps, wakeUrl2) {
+  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/waiting`;
 }
 function waitingRequest(deps, wake, body) {
@@ -752,8 +756,8 @@ async function sendFor(deps, sessionId, body, budgetMs) {
     return answer !== null && typeof answer === "object" ? answer : {};
   });
 }
-function decisionUrl(deps, wakeUrl, request, nonce) {
-  const base = wakeUrl ?? `${loadDepsConfig(deps).baseUrl}/wake`;
+function decisionUrl(deps, wakeUrl2, request, nonce) {
+  const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
   return `${base.replace(/\/+$/, "")}/decision?request=${encodeURIComponent(request)}&nonce=${encodeURIComponent(nonce)}`;
 }
 var STATES = [
@@ -823,7 +827,7 @@ var bound = (deps, sessionId) => {
   return wake !== undefined && wake.dead !== true;
 };
 var nowIso = (deps) => new Date(deps.now?.() ?? Date.now()).toISOString();
-var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var realSleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
 function answerWaitSeconds(deps) {
   const raw = deps.env.HARNESSIM_ANSWER_WAIT_S;
   if (raw === undefined || raw.trim() === "")
@@ -872,6 +876,7 @@ async function permissionRequest(input, deps, sleep = realSleep) {
       outside: writesOutside(input.tool_input, deps.cwd),
       until: start + budgetMs,
       nonce: newNonce(),
+      call: callHash(input.tool_input),
       source: "permission",
       ...command === undefined ? {} : { command },
       ...url === undefined ? {} : { url },
@@ -1076,6 +1081,7 @@ function requestOf(file, nowMs, minLeft = MIN_ANSWER_S) {
     ...file.options === undefined ? {} : { options: file.options },
     ...file.multi === true ? { multi: true } : {},
     ...file.suggestion === undefined ? {} : { suggestion: file.suggestion },
+    ...file.call === undefined ? {} : { call: file.call },
     ...file.host === undefined ? {} : { host: file.host },
     ...file.project === undefined ? {} : { project: file.project }
   };
@@ -1088,13 +1094,24 @@ async function clearWaiting(input, deps) {
   if (!existsSync3(path))
     return "";
   const file = readWaiting(deps.dataDir, sessionId);
+  if (file?.tool !== undefined && (input.hook_event_name === "PostToolUse" || input.hook_event_name === "PostToolUseFailure")) {
+    const finished = str(input.tool_name);
+    const sameTool = finished === file.tool;
+    const sameCall = file.call === undefined || callHash(input.tool_input) === file.call;
+    if (finished !== undefined && (!sameTool || !sameCall))
+      return "";
+  }
   try {
     rmSync2(path, { force: true });
   } catch {
     return "";
   }
-  if (file?.told)
-    await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS);
+  if (file?.told) {
+    const tool = str(input.tool_name);
+    const same = file.call !== undefined && tool === file.tool && callHash(input.tool_input) === file.call;
+    const ran = input.hook_event_name === "PostToolUse" && tool !== undefined && same ? { ran: { tool, call: file.call } } : {};
+    await send(deps, sessionId, { waiting: false, ...ran }, CLEAR_BUDGET_MS);
+  }
   return "";
 }
 async function waitingHook(input, deps, sleep = realSleep) {
@@ -1116,6 +1133,178 @@ async function waitingHook(input, deps, sleep = realSleep) {
 }
 
 import { homedir } from "node:os";
+
+import { execFileSync } from "node:child_process";
+import { mkdirSync as mkdirSync3, readFileSync as readFileSync2 } from "node:fs";
+import { join as join4 } from "node:path";
+function pointerPath(dataDir, pid) {
+  return join4(dataDir, "by-pid", `${pid}.json`);
+}
+function writePointer(dataDir, pid, sessionId, source, now = new Date) {
+  mkdirSync3(join4(dataDir, "by-pid"), { recursive: true });
+  writeJsonAtomic(pointerPath(dataDir, pid), { sessionId, at: now.toISOString(), source });
+}
+function parentPid(pid) {
+  try {
+    const stat = readFileSync2(`/proc/${pid}/stat`, "utf8");
+    const after = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const ppid = Number(after[1]);
+    return Number.isFinite(ppid) && ppid > 0 ? ppid : undefined;
+  } catch {
+    try {
+      const out = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
+        encoding: "utf8",
+        timeout: 1000
+      });
+      const ppid = Number(out.trim());
+      return Number.isFinite(ppid) && ppid > 0 ? ppid : undefined;
+    } catch {
+      return;
+    }
+  }
+}
+function ancestors(start, depth = 6, parent = parentPid) {
+  const out = [];
+  let pid = start;
+  while (pid !== undefined && pid > 1 && out.length < depth) {
+    out.push(pid);
+    pid = parent(pid);
+  }
+  return out;
+}
+function claudePid(env, chain) {
+  const fromEnv = Number(env.CLAUDE_PID);
+  if (Number.isFinite(fromEnv) && fromEnv > 1)
+    return fromEnv;
+  return chain[0];
+}
+function resolveSessionId(env, dataDir, chain, read = (p) => readJson(p)) {
+  const envPid = Number(env.CLAUDE_PID);
+  const candidates = Number.isFinite(envPid) && envPid > 1 ? [envPid, ...chain] : [...chain];
+  for (const pid2 of candidates) {
+    const pointer = read(pointerPath(dataDir, pid2));
+    if (pointer?.sessionId)
+      return { sessionId: pointer.sessionId, how: "pointer", claudePid: pid2 };
+  }
+  const fromEnv = env.CLAUDE_CODE_SESSION_ID?.trim();
+  const pid = claudePid(env, chain);
+  if (fromEnv)
+    return { sessionId: fromEnv, how: "env", ...pid ? { claudePid: pid } : {} };
+  return { sessionId: `pid-${sanitizeId(String(pid ?? process.pid))}`, how: "synthetic", ...pid ? { claudePid: pid } : {} };
+}
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+function processArgv(pid) {
+  try {
+    return readFileSync2(`/proc/${pid}/cmdline`, "utf8").split("\x00").filter(Boolean);
+  } catch {
+    try {
+      return execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 1000 }).trim().split(/\s+/);
+    } catch {
+      return [];
+    }
+  }
+}
+
+import { join as join5 } from "node:path";
+import { mkdirSync as mkdirSync4 } from "node:fs";
+var HEARTBEAT_MS = 1e4;
+var HEARTBEAT_STALE_MS = 35000;
+function heartbeatPath(dataDir, sessionId) {
+  return join5(sessionDir(dataDir, sessionId), "channel.json");
+}
+function writeHeartbeat(dataDir, sessionId, beat) {
+  mkdirSync4(sessionDir(dataDir, sessionId), { recursive: true });
+  writeJsonAtomic(heartbeatPath(dataDir, sessionId), beat);
+}
+function channelActive(dataDir, sessionId, now, alive, read = (p) => readJson(p)) {
+  const beat = read(heartbeatPath(dataDir, sessionId));
+  if (!beat)
+    return false;
+  const at = Date.parse(beat.beatAt);
+  if (!Number.isFinite(at) || now - at > HEARTBEAT_STALE_MS)
+    return false;
+  return alive(beat.pid);
+}
+var CHANNEL_FLAGS = ["--channels", "--dangerously-load-development-channels"];
+function channelFlagNames(argv) {
+  const entries = [];
+  for (let i = 0;i < argv.length; i += 1) {
+    const arg = argv[i] ?? "";
+    const flag = CHANNEL_FLAGS.find((f) => arg === f || arg.startsWith(`${f}=`));
+    if (!flag)
+      continue;
+    const values = [];
+    if (arg.startsWith(`${flag}=`))
+      values.push(arg.slice(flag.length + 1));
+    else {
+      for (let j = i + 1;j < argv.length; j += 1) {
+        const next = argv[j] ?? "";
+        if (next.startsWith("-"))
+          break;
+        if (!/^(plugin|server):/.test(next))
+          break;
+        values.push(next);
+        i = j;
+      }
+    }
+    for (const value of values)
+      entries.push(...value.split(",").map((v) => v.trim()).filter(Boolean));
+  }
+  return entries;
+}
+function optsInPlugin(argv, plugin, server) {
+  return channelFlagNames(argv).some((entry) => entry === `plugin:${plugin}` || entry.startsWith(`plugin:${plugin}@`) || entry === `server:${server}` || entry === `server:plugin:${plugin}:${server}`);
+}
+function decideChannel(input) {
+  const o = input.override?.trim().toLowerCase();
+  if (o === "on" || o === "1" || o === "true")
+    return { active: true, how: "env HARNESSIM_CHANNEL=on" };
+  if (o === "off" || o === "0" || o === "false")
+    return { active: false, how: "env HARNESSIM_CHANNEL=off" };
+  const caps = input.clientCapabilities;
+  if (caps?.experimental && "claude/channel" in caps.experimental) {
+    return { active: true, how: "client capability claude/channel" };
+  }
+  if (optsInPlugin(input.claudeArgv, input.plugin, input.server)) {
+    return { active: true, how: "Claude Code argv opts the plugin in" };
+  }
+  return {
+    active: false,
+    how: "not opted in (no channel flag naming this plugin)"
+  };
+}
+function channelEventsReach(input) {
+  const flag = (value) => {
+    const v = value?.trim().toLowerCase();
+    if (v === "on" || v === "1" || v === "true")
+      return true;
+    if (v === "off" || v === "0" || v === "false")
+      return false;
+    return;
+  };
+  const events = flag(input.override);
+  if (events !== undefined)
+    return events;
+  if (flag(input.channelOverride) === true)
+    return true;
+  return channelFlagNames(input.claudeArgv).some((entry) => entry === `plugin:${input.plugin}` || entry.startsWith(`plugin:${input.plugin}@`) || entry === `server:${input.server}` || entry === `server:plugin:${input.plugin}:${input.server}` || entry.toLowerCase() === "server:harnessim");
+}
+var CHANNEL_EVENT_KINDS = [
+  "dm",
+  "mention",
+  "thread_reply",
+  "broadcast",
+  "reminder",
+  "question"
+];
+
 async function readStdin(limit = 1e6) {
   if (process.stdin.isTTY)
     return "";
@@ -1139,11 +1328,22 @@ function parseJson(text) {
 }
 function depsFromProcess(argv = process.argv.slice(2), cwd) {
   const env = process.env;
+  let reach;
   return {
     env,
     home: homedir(),
     dataDir: resolveDataDir(env, argv, homedir()),
-    cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd()
+    cwd: cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd(),
+    channelEvents: () => {
+      reach ??= channelEventsReach({
+        override: env.HARNESSIM_CHANNEL_EVENTS,
+        channelOverride: env.HARNESSIM_CHANNEL,
+        claudeArgv: processArgv(claudePid(env, ancestors(process.ppid)) ?? process.ppid),
+        plugin: PLUGIN_NAME,
+        server: "im"
+      });
+      return reach;
+    }
   };
 }
 async function runHook(fn) {
