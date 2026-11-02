@@ -34,7 +34,8 @@ var LABELS = {
   reaction: ["reaction", "reactions"],
   reminder: ["due reminder", "due reminders"],
   question: ["question update", "question updates"],
-  ticket: ["ticket update", "ticket updates"],
+  ticket: ["task update", "task updates"],
+  task: ["task update", "task updates"],
   page: ["page update", "page updates"],
   sub_agent: ["item for your sub-agents", "items for your sub-agents"]
 };
@@ -701,7 +702,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.14.5";
+var VERSION = "0.14.7";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {

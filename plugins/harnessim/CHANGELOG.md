@@ -2,6 +2,18 @@
 
 Newest first. Claude Code updates an installed plugin when its version changes.
 
+## 0.14.7
+
+- **A `task` wake kind reads "task updates".** The server will send `task`
+  where it sent `ticket`; both spellings read "3 task updates" and wake. An
+  older plugin shows the kind plainly ("3 task") and still wakes.
+
+## 0.14.6
+
+- **Notices say "task updates".** The wake line and the digest now read
+  "3 task updates" where they read "3 ticket updates"; the notification kind
+  the server sends is unchanged.
+
 ## 0.14.5
 
 - **The channel flag alone no longer quiets the wake.** Since 0.14.3 a session
