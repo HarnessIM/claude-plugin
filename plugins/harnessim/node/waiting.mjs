@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync as rmSync2 } from "node:fs";
+import { existsSync as existsSync4, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync as rmSync2 } from "node:fs";
 import { hostname } from "node:os";
-import { basename, isAbsolute, join as join3, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join as join4, relative, resolve, sep } from "node:path";
 
 var obj = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 var MAX_QUESTIONS = 4;
@@ -469,7 +469,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.14.7";
+var VERSION = "0.15.0";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -501,11 +501,114 @@ async function withDeadline(ms, fallback, run) {
   }
 }
 
+import { existsSync as existsSync2, readFileSync } from "node:fs";
+import { join as join2 } from "node:path";
+var OWN_SERVERS = [
+  "mcp__plugin_harnessim_im__",
+  "mcp__plugin_harnessim_im-live__"
+];
+var READ_TOOLS = new Set([
+  "check_notifications",
+  "get_attachment",
+  "get_context",
+  "get_pins",
+  "list_channels",
+  "list_identities",
+  "list_members",
+  "list_sessions",
+  "list_toolsets",
+  "live_status",
+  "page",
+  "question",
+  "read_channel_messages",
+  "read_new_messages",
+  "read_thread_replies",
+  "search_messages",
+  "skill",
+  "skills",
+  "status_history",
+  "tasks",
+  "tools_documentation"
+]);
+function autoApproveLevel(env) {
+  const raw = clean(env.HARNESSIM_AUTO_APPROVE) ?? clean(env.CLAUDE_PLUGIN_OPTION_AUTOAPPROVE);
+  if (raw === undefined)
+    return "all";
+  const v = raw.toLowerCase();
+  return v === "all" || v === "reads" ? v : "off";
+}
+function ownTool(tool) {
+  for (const prefix of OWN_SERVERS) {
+    if (tool.startsWith(prefix))
+      return tool.slice(prefix.length);
+  }
+  return;
+}
+function ruleMatches(rule, tool) {
+  const r = rule.trim();
+  if (r === tool)
+    return true;
+  if (r.endsWith("*") && tool.startsWith(r.slice(0, -1)))
+    return true;
+  const server = tool.slice(0, tool.indexOf("__", "mcp__".length));
+  return r === server;
+}
+function ruleList(settings, key) {
+  if (settings === null || typeof settings !== "object")
+    return [];
+  const perms = settings.permissions;
+  if (perms === null || typeof perms !== "object")
+    return [];
+  const list = perms[key];
+  return Array.isArray(list) ? list.filter((x) => typeof x === "string") : [];
+}
+function settingsPaths(home, cwd) {
+  return [
+    ...home === undefined ? [] : [
+      join2(home, ".claude", "settings.json"),
+      join2(home, ".claude", "settings.local.json")
+    ],
+    join2(cwd, ".claude", "settings.json"),
+    join2(cwd, ".claude", "settings.local.json"),
+    "/etc/claude-code/managed-settings.json"
+  ];
+}
+function ownerRuleCovers(tool, home, cwd) {
+  for (const path of settingsPaths(home, cwd)) {
+    if (!existsSync2(path))
+      continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      return true;
+    }
+    for (const key of ["ask", "deny"]) {
+      if (ruleList(parsed, key).some((r) => ruleMatches(r, tool)))
+        return true;
+    }
+  }
+  return false;
+}
+function autoApproves(tool, env, home, cwd) {
+  if (tool === undefined)
+    return false;
+  const name = ownTool(tool);
+  if (name === undefined || name === "")
+    return false;
+  const level = autoApproveLevel(env);
+  if (level === "off")
+    return false;
+  if (level === "reads" && !READ_TOOLS.has(name))
+    return false;
+  return !ownerRuleCovers(tool, home, cwd);
+}
+
 import {
   chmodSync,
-  existsSync as existsSync2,
+  existsSync as existsSync3,
   mkdirSync,
-  readFileSync,
+  readFileSync as readFileSync2,
   readdirSync,
   renameSync,
   rmdirSync,
@@ -513,18 +616,18 @@ import {
   statSync,
   writeFileSync
 } from "node:fs";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 var LOCK_STALE_MS = 5000;
 var LOCK_WAIT_MS = 1500;
 function sanitizeId(value) {
   return value.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 128) || "unknown";
 }
 function sessionDir(dataDir, sessionId) {
-  return join2(dataDir, "sessions", sanitizeId(sessionId));
+  return join3(dataDir, "sessions", sanitizeId(sessionId));
 }
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync2(path, "utf8"));
   } catch {
     return;
   }
@@ -542,7 +645,7 @@ function busyWait(ms) {
 }
 function withLock(dir, fn, now = Date.now) {
   mkdirSync(dir, { recursive: true });
-  const lock = join2(dir, "state.lock");
+  const lock = join3(dir, "state.lock");
   const deadline = now() + LOCK_WAIT_MS;
   for (;; ) {
     try {
@@ -571,7 +674,7 @@ function withLock(dir, fn, now = Date.now) {
   }
 }
 function loadState(dataDir, sessionId, now = new Date) {
-  const existing = readJson(join2(sessionDir(dataDir, sessionId), "state.json"));
+  const existing = readJson(join3(sessionDir(dataDir, sessionId), "state.json"));
   if (existing && existing.sessionId === sessionId)
     return existing;
   const at = now.toISOString();
@@ -580,7 +683,7 @@ function loadState(dataDir, sessionId, now = new Date) {
 function saveState(dataDir, state, now = new Date) {
   const dir = sessionDir(dataDir, state.sessionId);
   mkdirSync(dir, { recursive: true });
-  writeJsonAtomic(join2(dir, "state.json"), {
+  writeJsonAtomic(join3(dir, "state.json"), {
     ...state,
     updatedAt: now.toISOString()
   });
@@ -627,16 +730,16 @@ function forgetWakeUrl(dataDir, sessionId, token, now = new Date) {
   }, now);
 }
 function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
-  const root = join2(dataDir, "sessions");
+  const root = join3(dataDir, "sessions");
   const removed = [];
-  if (!existsSync2(root))
+  if (!existsSync3(root))
     return removed;
   for (const name of readdirSync(root)) {
     if (name === sanitizeId(keep))
       continue;
-    const dir = join2(root, name);
+    const dir = join3(root, name);
     try {
-      const state = statSync(join2(dir, "state.json"), {
+      const state = statSync(join3(dir, "state.json"), {
         throwIfNoEntry: false
       });
       const mtime = state?.mtimeMs ?? statSync(dir).mtimeMs;
@@ -646,10 +749,10 @@ function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
       }
     } catch {}
   }
-  const pids = join2(dataDir, "by-pid");
-  if (existsSync2(pids)) {
+  const pids = join3(dataDir, "by-pid");
+  if (existsSync3(pids)) {
     for (const name of readdirSync(pids)) {
-      const file = join2(pids, name);
+      const file = join3(pids, name);
       try {
         if (now - statSync(file).mtimeMs > maxAgeMs)
           rmSync(file, { force: true });
@@ -672,8 +775,8 @@ function callHash(toolInput) {
   const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, inner]) => [key, canonical(inner)])) : value;
   return createHash("sha256").update(JSON.stringify(canonical(toolInput) ?? null)).digest("hex").slice(0, 16);
 }
-var waitingDir = (dataDir) => join3(dataDir, "waiting");
-var waitingPath = (dataDir, sessionId) => join3(waitingDir(dataDir), `${sanitizeId(sessionId)}.json`);
+var waitingDir = (dataDir) => join4(dataDir, "waiting");
+var waitingPath = (dataDir, sessionId) => join4(waitingDir(dataDir), `${sanitizeId(sessionId)}.json`);
 function redact(text) {
   return text.replace(/\b([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/g, "$1=…").replace(/(--?[A-Za-z0-9_-]*(?:token|secret|passw(?:or)?d|key|auth)[A-Za-z0-9_-]*)(\s+)(\S+)/gi, "$1$2…").replace(/\b((?:proxy-)?authorization|cookie|x-api-key)\s*:\s*[^'"\n]*/gi, "$1: …").replace(/\b(bearer|basic)\s+[^\s'"…]+/gi, "$1 …").replace(/\b(\w+:\/\/)[^\s/@:]+:[^\s/@]+@/g, "$1…@").replace(/\b(?:sk|pk|rk|ghp|gho|ghs|ghu|github_pat|glpat|xox[abpros]|hk|wt|hst|AKIA|ASIA|AIza|ya29|eyJ)[-_.A-Za-z0-9]{8,}/g, "…").replace(/[A-Fa-f0-9]{24,}/g, "…").replace(/(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, "…");
 }
@@ -853,9 +956,12 @@ var where = (deps) => {
 };
 async function permissionRequest(input, deps, sleep = realSleep) {
   const sessionId = input.session_id;
+  const tool = str(input.tool_name);
+  if (autoApproves(tool, deps.env, deps.home, deps.cwd)) {
+    return decisionOutput("allow_once");
+  }
   if (!sessionId || !bound(deps, sessionId))
     return "";
-  const tool = str(input.tool_name);
   if (tool !== undefined && PLANNING_TOOLS.has(tool)) {
     return planningRequest(input, deps, sleep);
   }
@@ -1092,7 +1198,7 @@ async function clearWaiting(input, deps) {
   if (!sessionId)
     return "";
   const path = waitingPath(deps.dataDir, sessionId);
-  if (!existsSync3(path))
+  if (!existsSync4(path))
     return "";
   const file = readWaiting(deps.dataDir, sessionId);
   if (file?.tool !== undefined && (input.hook_event_name === "PostToolUse" || input.hook_event_name === "PostToolUseFailure")) {
@@ -1135,12 +1241,12 @@ async function waitingHook(input, deps, sleep = realSleep) {
 
 import { homedir } from "node:os";
 
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 import { mkdirSync as mkdirSync3 } from "node:fs";
 var HEARTBEAT_MS = 1e4;
 var HEARTBEAT_STALE_MS = 35000;
 function heartbeatPath(dataDir, sessionId) {
-  return join4(sessionDir(dataDir, sessionId), "channel.json");
+  return join5(sessionDir(dataDir, sessionId), "channel.json");
 }
 function writeHeartbeat(dataDir, sessionId, beat) {
   mkdirSync3(sessionDir(dataDir, sessionId), { recursive: true });

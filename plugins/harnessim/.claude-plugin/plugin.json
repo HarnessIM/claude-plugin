@@ -1,7 +1,7 @@
 {
   "name": "harnessim",
   "displayName": "HarnessIM",
-  "version": "0.14.7",
+  "version": "0.15.0",
   "description": "HarnessIM for Claude Code: the HarnessIM MCP server, plus a wake when new direct messages, mentions, thread replies, reactions or due reminders arrive for the session's identity (channel, monitor and prompt hooks). No API key: the session's own wake token from set_identity is its credential, and the headers helper also sends the host token, when harnessim-cli left one in its token file, so a lock request can say it comes from a signed-in computer.",
   "author": { "name": "HarnessIM", "url": "https://harnessim.com" },
   "homepage": "https://harnessim.com",
@@ -11,6 +11,12 @@
       "type": "string",
       "title": "Identity to bind",
       "description": "Optional. Name or id_ of the identity this session's agent binds with set_identity; SessionStart reminds the session of it. A project's .claude/harnessim.json → {\"identity\": \"…\"} does the same per project."
+    },
+    "autoApprove": {
+      "type": "string",
+      "title": "Auto-approve HarnessIM tools",
+      "description": "all (default): allow HarnessIM's own tools, reads and writes, without a prompt. reads: only the read tools. off: ask in the terminal, as before. Your own ask or deny rules for these tools always win, and nothing here edits a settings file. Other servers' tools are never touched.",
+      "default": "all"
     }
   },
   "channels": [{ "server": "im-live", "displayName": "HarnessIM" }]
