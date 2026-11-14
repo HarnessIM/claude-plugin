@@ -107,6 +107,17 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run.sh\" waiting clear",
+            "timeout": 2
+          }
+        ]
+      }
     ]
   }
 }

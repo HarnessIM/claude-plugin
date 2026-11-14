@@ -6,6 +6,84 @@ equal) and adds an entry here, newest first. Claude Code only updates an
 installed plugin when that version changes. `bun scripts/plugin-version.ts`
 at the repository root checks both; see README → Releasing.
 
+## 0.16.3
+
+- **A permission prompt's notice keeps its request.** The notice that tells
+  HarnessIM you are waiting waited the whole grace (default 60 s,
+  `HARNESSIM_WAITING_GRACE_S` up to 3600 s) even when that was longer than
+  the answer window, so it went out after the hook had stopped waiting,
+  without the request, and HarnessIM could only say "answer it there". The
+  notice now waits only as long as leaves the minimum answer window
+  (15 s), so the request is sent whenever the hook is still waiting.
+- **`HARNESSIM_DEBUG=prompts` writes a local trace**, `prompts-debug.log`
+  in the plugin's data directory beside `waiting.log` (mode 0600, bounded,
+  off unless the flag is set). One line per step of the wait: each hook
+  firing, which fields the wait file has (the nonce only as an 8-character
+  hash prefix), the wait settings in force, each poll's outcome, and the
+  named reason a notice carried no request (`answer_wait_zero_env`,
+  `no_tool`, `no_until`, `no_nonce`, `deadline_passed`,
+  `under_min_answer_s`, `not_permission_kind`). It never records the wake
+  token, a nonce, a command, a path or an answer.
+- **`waiting debug [N]`** prints the last N lines (default 50) of that
+  trace: `sh "$CLAUDE_PLUGIN_ROOT/scripts/run.sh" waiting debug 30`.
+
+## 0.16.2
+
+- **One waiting slot per agent.** The server held one waiting request per
+  session, so two subagents' prompts at once replaced each other. A
+  subagent's prompt now has its own local wait file
+  (`waiting/<session>~<agent>.json`) and sends `agent_id` and `agent_type`
+  on `POST /wake/waiting`; its clear sends `agent_id`. The main session's
+  prompt is a slot of its own and sends neither. The owner is told
+  *waiting at a permission prompt (subagent: Explore)*.
+- **Clears are per slot.** A tool or stop event clears the file of the agent
+  it names (the main session's when it names none); `SubagentStop` ends only
+  its own agent's wait; a prompt the person types ends every wait of the
+  session.
+- **Older servers keep working.** A server that predates `agent_id` refuses
+  the body (400); the plugin retries once without the agent fields, and the
+  wait then takes the one slot such a server has, as in 0.16.1.
+
+## 0.16.1
+
+- **A subagent's permission prompt reaches HarnessIM.** Production showed a
+  subagent's Bash prompt on a 0.14/0.15 plugin never sent `POST /wake/waiting`
+  while the main session's did. Measured on Claude Code 2.x: a subagent's
+  `PermissionRequest` fires with the parent's `session_id` plus `agent_id` and
+  `agent_type`; whether its `Notification` (the only thing that told HarnessIM)
+  fires for it could not be shown. The `PermissionRequest` hook now tells
+  HarnessIM itself once the grace has passed and the prompt is still open, so
+  a subagent's prompt no longer depends on the `Notification`.
+- **A subagent's wait is cleared only by that subagent.** The wait records
+  its `agent_id`; the parent's and other subagents' `PostToolUse`, `Stop` and
+  `SubagentStop` leave it open, the owner's own events and a prompt the person
+  types end it. New `SubagentStop` hook clears a prompt that was denied.
+- **`waiting.log` also records clears** that meet an open wait: `event`,
+  session and agent ids, tool name, and `status` (the HTTP status of the
+  `waiting:false`, `cleared:not_told`, `skipped:other_agent` or
+  `skipped:other_call`). Same bounds as before; no text or tokens.
+
+## 0.16.0
+
+- **`waiting.log`: local evidence of the permission-prompt relay.** Every
+  `PermissionRequest` and `Notification` hook run appends one JSON line to
+  `waiting.log` in the plugin's data dir (mode 0600, kept under 256 KB by
+  dropping the oldest half): `at`, `event`, `session`, `tool` (the name
+  only), `agent_id` / `agent_type` / `from_subagent`, `had_permission_request`,
+  `bound`, `status` (the `POST /wake/waiting` HTTP status, or
+  `skipped:<why>` / `error:<why>`), `decision` (`allow` / `deny` / `ask` /
+  `none`), `plugin_version` and `client_version`. It never holds tool input,
+  prompt text, commands, tokens or env values, and a write failure never
+  changes or slows a hook. A run cut short by the hook's timeout is logged
+  too. README -> Prompt relay: how to check.
+- **The notice names Claude Code's version.** `POST /wake/waiting` with
+  `waiting: true` carries an optional `client_version` (read from the first
+  lines of the session transcript); a server that refuses the field (400)
+  gets the same request without it.
+- **A subagent's prompt names the subagent.** A `PermissionRequest` carrying
+  `agent_id` is relayed under the session as before, and its summary starts
+  `<agent_type> subagent:`.
+
 ## 0.15.0
 
 - **HarnessIM's own tools are approved without a prompt by default (founder

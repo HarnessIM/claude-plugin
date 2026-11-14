@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync as rmSync2 } from "node:fs";
+import { createHash as createHash2, randomBytes, randomUUID } from "node:crypto";
+import { existsSync as existsSync4, mkdirSync as mkdirSync4, readdirSync as readdirSync2, rmSync as rmSync2 } from "node:fs";
 import { hostname } from "node:os";
-import { basename, isAbsolute, join as join4, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join as join6, relative, resolve, sep } from "node:path";
 
 var obj = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 var MAX_QUESTIONS = 4;
@@ -469,7 +469,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.15.0";
+var VERSION = "0.16.3";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -604,39 +604,157 @@ function autoApproves(tool, env, home, cwd) {
   return !ownerRuleCovers(tool, home, cwd);
 }
 
+import { createHash } from "node:crypto";
 import {
   chmodSync,
-  existsSync as existsSync3,
+  closeSync,
+  fchmodSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync as readFileSync2,
+  writeFileSync,
+  writeSync
+} from "node:fs";
+import { join as join3 } from "node:path";
+var DEBUG_FILE = "prompts-debug.log";
+var DEBUG_MAX_BYTES = 512 * 1024;
+var KEYS = new Set([
+  "event",
+  "session",
+  "agent",
+  "bound",
+  "reason",
+  "outcome",
+  "decision",
+  "tool",
+  "kind",
+  "source",
+  "has_tool",
+  "has_until",
+  "has_nonce",
+  "nonce_sha",
+  "command_len",
+  "told",
+  "answers",
+  "left_s",
+  "answer_wait_s",
+  "answer_wait_env_set",
+  "grace_s",
+  "grace_used_s",
+  "min_answer_s",
+  "budget_s",
+  "waited_s",
+  "status",
+  "request_sent",
+  "file"
+]);
+var SAFE = /^[A-Za-z0-9_.:~-]{0,64}$/;
+var debugOn = (env) => (env.HARNESSIM_DEBUG ?? "").split(",").map((s) => s.trim().toLowerCase()).includes("prompts");
+var shortHash = (secret) => secret === undefined || secret === "" ? undefined : createHash("sha256").update(secret).digest("hex").slice(0, 8);
+function clean2(fields) {
+  const out = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (!KEYS.has(key) || value === undefined)
+      continue;
+    out[key] = typeof value === "string" ? SAFE.test(value) ? value : "[redacted]" : typeof value === "number" ? Number.isFinite(value) ? value : -1 : value;
+  }
+  return out;
+}
+function dbg(deps, step, fields = {}) {
+  if (!debugOn(deps.env))
+    return;
+  try {
+    mkdirSync(deps.dataDir, { recursive: true, mode: 448 });
+    const path = join3(deps.dataDir, DEBUG_FILE);
+    const fd = openSync(path, "a", 384);
+    try {
+      fchmodSync(fd, 384);
+      if (fstatSync(fd).size >= DEBUG_MAX_BYTES)
+        rotate(path);
+      writeSync(fd, `${JSON.stringify({
+        at: new Date(deps.now?.() ?? Date.now()).toISOString(),
+        step: SAFE.test(step) ? step : "[redacted]",
+        ...clean2(fields)
+      })}
+`);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {}
+}
+function rotate(path) {
+  const text = readFileSync2(path, "utf8");
+  const tail = text.slice(Math.floor(text.length / 2));
+  const cut = tail.indexOf(`
+`);
+  writeFileSync(path, cut === -1 ? "" : tail.slice(cut + 1), { mode: 384 });
+  chmodSync(path, 384);
+}
+function lastDebugLines(dataDir, n) {
+  try {
+    const lines = readFileSync2(join3(dataDir, DEBUG_FILE), "utf8").split(`
+`).filter((l) => l !== "");
+    return n <= 0 ? [] : lines.slice(-n);
+  } catch {
+    return [];
+  }
+}
+function formatDebugLine(raw) {
+  try {
+    const { at, step, ...rest } = JSON.parse(raw);
+    const fields = clean2(rest);
+    const when = typeof at === "string" ? at.replace(/\.\d+Z$/, "Z") : "?";
+    const what = typeof step === "string" && SAFE.test(step) ? step : "?";
+    const kv = Object.entries(fields).map(([k, v]) => `${k}=${String(v)}`).join(" ");
+    return kv === "" ? `${when} ${what}` : `${when} ${what} ${kv}`;
+  } catch {
+    return "[unreadable]";
+  }
+}
+function debugReport(dataDir, n = 50) {
+  const lines = lastDebugLines(dataDir, n);
+  if (lines.length === 0)
+    return `No prompt trace in ${join3(dataDir, DEBUG_FILE)}. Start Claude Code with HARNESSIM_DEBUG=prompts to record one.
+`;
+  return `${lines.map(formatDebugLine).join(`
+`)}
+`;
+}
+
+import {
+  chmodSync as chmodSync2,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync2,
+  readFileSync as readFileSync3,
   readdirSync,
   renameSync,
   rmdirSync,
   rmSync,
   statSync,
-  writeFileSync
+  writeFileSync as writeFileSync2
 } from "node:fs";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 var LOCK_STALE_MS = 5000;
 var LOCK_WAIT_MS = 1500;
 function sanitizeId(value) {
   return value.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 128) || "unknown";
 }
 function sessionDir(dataDir, sessionId) {
-  return join3(dataDir, "sessions", sanitizeId(sessionId));
+  return join4(dataDir, "sessions", sanitizeId(sessionId));
 }
 function readJson(path) {
   try {
-    return JSON.parse(readFileSync2(path, "utf8"));
+    return JSON.parse(readFileSync3(path, "utf8"));
   } catch {
     return;
   }
 }
 function writeJsonAtomic(path, value, mode = 384) {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+  writeFileSync2(tmp, `${JSON.stringify(value, null, 2)}
 `, { mode });
-  chmodSync(tmp, mode);
+  chmodSync2(tmp, mode);
   renameSync(tmp, path);
 }
 function busyWait(ms) {
@@ -644,12 +762,12 @@ function busyWait(ms) {
   Atomics.wait(shared, 0, 0, ms);
 }
 function withLock(dir, fn, now = Date.now) {
-  mkdirSync(dir, { recursive: true });
-  const lock = join3(dir, "state.lock");
+  mkdirSync2(dir, { recursive: true });
+  const lock = join4(dir, "state.lock");
   const deadline = now() + LOCK_WAIT_MS;
   for (;; ) {
     try {
-      mkdirSync(lock);
+      mkdirSync2(lock);
       break;
     } catch {
       try {
@@ -674,7 +792,7 @@ function withLock(dir, fn, now = Date.now) {
   }
 }
 function loadState(dataDir, sessionId, now = new Date) {
-  const existing = readJson(join3(sessionDir(dataDir, sessionId), "state.json"));
+  const existing = readJson(join4(sessionDir(dataDir, sessionId), "state.json"));
   if (existing && existing.sessionId === sessionId)
     return existing;
   const at = now.toISOString();
@@ -682,8 +800,8 @@ function loadState(dataDir, sessionId, now = new Date) {
 }
 function saveState(dataDir, state, now = new Date) {
   const dir = sessionDir(dataDir, state.sessionId);
-  mkdirSync(dir, { recursive: true });
-  writeJsonAtomic(join3(dir, "state.json"), {
+  mkdirSync2(dir, { recursive: true });
+  writeJsonAtomic(join4(dir, "state.json"), {
     ...state,
     updatedAt: now.toISOString()
   });
@@ -730,16 +848,16 @@ function forgetWakeUrl(dataDir, sessionId, token, now = new Date) {
   }, now);
 }
 function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
-  const root = join3(dataDir, "sessions");
+  const root = join4(dataDir, "sessions");
   const removed = [];
   if (!existsSync3(root))
     return removed;
   for (const name of readdirSync(root)) {
     if (name === sanitizeId(keep))
       continue;
-    const dir = join3(root, name);
+    const dir = join4(root, name);
     try {
-      const state = statSync(join3(dir, "state.json"), {
+      const state = statSync(join4(dir, "state.json"), {
         throwIfNoEntry: false
       });
       const mtime = state?.mtimeMs ?? statSync(dir).mtimeMs;
@@ -749,10 +867,10 @@ function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
       }
     } catch {}
   }
-  const pids = join3(dataDir, "by-pid");
+  const pids = join4(dataDir, "by-pid");
   if (existsSync3(pids)) {
     for (const name of readdirSync(pids)) {
-      const file = join3(pids, name);
+      const file = join4(pids, name);
       try {
         if (now - statSync(file).mtimeMs > maxAgeMs)
           rmSync(file, { force: true });
@@ -760,6 +878,114 @@ function pruneSessions(dataDir, maxAgeMs, keep, now = Date.now()) {
     }
   }
   return removed;
+}
+
+import {
+  chmodSync as chmodSync3,
+  closeSync as closeSync2,
+  fstatSync as fstatSync2,
+  fchmodSync as fchmodSync2,
+  mkdirSync as mkdirSync3,
+  openSync as openSync2,
+  readFileSync as readFileSync4,
+  readSync,
+  writeFileSync as writeFileSync3,
+  writeSync as writeSync2
+} from "node:fs";
+import { join as join5 } from "node:path";
+var LOG_FILE = "waiting.log";
+var LOG_MAX_BYTES = 256 * 1024;
+var VERSION_TEXT = /^\d+\.\d+\.\d+(?:[-+.][0-9A-Za-z.+-]{0,30})?$/;
+var TOOL_TEXT = /^[A-Za-z0-9_.:-]{1,64}$/;
+var TRANSCRIPT_HEAD_BYTES = 16 * 1024;
+var traces = new WeakMap;
+var open;
+var traceOf = (deps) => traces.get(deps);
+function startTrace(deps, trace) {
+  traces.set(deps, trace);
+  open = { deps, trace };
+}
+function clientVersionOf(transcriptPath) {
+  if (typeof transcriptPath !== "string" || transcriptPath === "")
+    return;
+  let fd;
+  try {
+    fd = openSync2(transcriptPath, "r");
+    const buf = Buffer.alloc(TRANSCRIPT_HEAD_BYTES);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    const m = /"version"\s*:\s*"([^"\\]{1,40})"/.exec(buf.toString("utf8", 0, n));
+    return m?.[1] !== undefined && VERSION_TEXT.test(m[1]) ? m[1] : undefined;
+  } catch {
+    return;
+  } finally {
+    if (fd !== undefined)
+      try {
+        closeSync2(fd);
+      } catch {}
+  }
+}
+var safeAgent = (v) => typeof v === "string" && /^[A-Za-z0-9_.:-]{1,40}$/.test(v) ? v : undefined;
+var safeTool = (tool) => typeof tool === "string" && TOOL_TEXT.test(tool) ? tool : undefined;
+function decisionOf(output) {
+  if (output === "")
+    return "none";
+  try {
+    const behavior = JSON.parse(output).hookSpecificOutput?.decision?.behavior;
+    return behavior === "allow" || behavior === "deny" || behavior === "ask" ? behavior : "none";
+  } catch {
+    return "none";
+  }
+}
+function appendWaitingLog(dataDir, line) {
+  try {
+    mkdirSync3(dataDir, { recursive: true, mode: 448 });
+    const path = join5(dataDir, LOG_FILE);
+    const fd = openSync2(path, "a", 384);
+    try {
+      fchmodSync2(fd, 384);
+      if (fstatSync2(fd).size >= LOG_MAX_BYTES)
+        rotate2(path);
+      writeSync2(fd, `${JSON.stringify(line)}
+`);
+    } finally {
+      closeSync2(fd);
+    }
+  } catch {}
+}
+function rotate2(path) {
+  const text = readFileSync4(path, "utf8");
+  const tail = text.slice(Math.floor(text.length / 2));
+  const cut = tail.indexOf(`
+`);
+  writeFileSync3(path, cut === -1 ? "" : tail.slice(cut + 1), { mode: 384 });
+  chmodSync3(path, 384);
+}
+function finishTrace(deps, trace, output) {
+  if (trace.logged)
+    return;
+  trace.logged = true;
+  if (open?.trace === trace)
+    open = undefined;
+  appendWaitingLog(deps.dataDir, {
+    at: new Date(deps.now?.() ?? Date.now()).toISOString(),
+    event: trace.event,
+    session: trace.session,
+    ...trace.tool === undefined ? {} : { tool: trace.tool },
+    ...trace.agentId === undefined ? {} : { agent_id: trace.agentId },
+    ...trace.agentType === undefined ? {} : { agent_type: trace.agentType },
+    from_subagent: trace.agentId !== undefined,
+    had_permission_request: trace.hadRequest,
+    bound: trace.bound,
+    status: trace.status,
+    decision: decisionOf(output),
+    plugin_version: VERSION,
+    ...trace.clientVersion === undefined ? {} : { client_version: trace.clientVersion }
+  });
+}
+function flushWaitingLog() {
+  if (open === undefined)
+    return;
+  finishTrace(open.deps, open.trace, "");
 }
 
 var SUMMARY_MAX2 = 80;
@@ -773,10 +999,17 @@ var DECISION_BUDGET_MS = 5000;
 var MIN_ANSWER_S = 15;
 function callHash(toolInput) {
   const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, inner]) => [key, canonical(inner)])) : value;
-  return createHash("sha256").update(JSON.stringify(canonical(toolInput) ?? null)).digest("hex").slice(0, 16);
+  return createHash2("sha256").update(JSON.stringify(canonical(toolInput) ?? null)).digest("hex").slice(0, 16);
 }
-var waitingDir = (dataDir) => join4(dataDir, "waiting");
-var waitingPath = (dataDir, sessionId) => join4(waitingDir(dataDir), `${sanitizeId(sessionId)}.json`);
+var waitingDir = (dataDir) => join6(dataDir, "waiting");
+var waitingPath = (dataDir, sessionId, agent) => join6(waitingDir(dataDir), agent === undefined ? `${sanitizeId(sessionId)}.json` : `${sanitizeId(sessionId)}~${sanitizeId(agent)}.json`);
+function agentOf(input) {
+  const id = safeAgent(input.agent_id);
+  if (id === undefined)
+    return;
+  const type = safeAgent(input.agent_type);
+  return type === undefined ? { id } : { id, type };
+}
 function redact(text) {
   return text.replace(/\b([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/g, "$1=…").replace(/(--?[A-Za-z0-9_-]*(?:token|secret|passw(?:or)?d|key|auth)[A-Za-z0-9_-]*)(\s+)(\S+)/gi, "$1$2…").replace(/\b((?:proxy-)?authorization|cookie|x-api-key)\s*:\s*[^'"\n]*/gi, "$1: …").replace(/\b(bearer|basic)\s+[^\s'"…]+/gi, "$1 …").replace(/\b(\w+:\/\/)[^\s/@:]+:[^\s/@]+@/g, "$1…@").replace(/\b(?:sk|pk|rk|ghp|gho|ghs|ghu|github_pat|glpat|xox[abpros]|hk|wt|hst|AKIA|ASIA|AIza|ya29|eyJ)[-_.A-Za-z0-9]{8,}/g, "…").replace(/[A-Fa-f0-9]{24,}/g, "…").replace(/(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/g, "…");
 }
@@ -816,12 +1049,33 @@ function writesOutside(toolInput, cwd) {
   const rel = relative(resolve(cwd), resolve(cwd, path));
   return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
 }
-function readWaiting(dataDir, sessionId) {
-  return readJson(waitingPath(dataDir, sessionId));
+function readWaiting(dataDir, sessionId, agent) {
+  return readJson(waitingPath(dataDir, sessionId, agent));
 }
-function writeWaiting(dataDir, sessionId, file) {
-  mkdirSync2(waitingDir(dataDir), { recursive: true, mode: 448 });
-  writeJsonAtomic(waitingPath(dataDir, sessionId), file);
+function writeWaiting(dataDir, sessionId, file, agent) {
+  mkdirSync4(waitingDir(dataDir), { recursive: true, mode: 448 });
+  writeJsonAtomic(waitingPath(dataDir, sessionId, agent), file);
+}
+function slotsOf(dataDir, sessionId) {
+  const main = `${sanitizeId(sessionId)}.json`;
+  const prefix = `${sanitizeId(sessionId)}~`;
+  let names;
+  try {
+    names = readdirSync2(waitingDir(dataDir));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const name of names) {
+    if (name === main)
+      out.push(undefined);
+    else if (name.startsWith(prefix) && name.endsWith(".json")) {
+      const agent = readJson(join6(waitingDir(dataDir), name))?.agent;
+      if (agent !== undefined)
+        out.push(agent);
+    }
+  }
+  return out;
 }
 function waitingUrl(deps, wakeUrl2) {
   const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
@@ -843,22 +1097,48 @@ function waitingRequest(deps, wake, body) {
     }
   };
 }
-async function send(deps, sessionId, body, budgetMs) {
-  return await sendFor(deps, sessionId, body, budgetMs) !== undefined;
+async function send(deps, sessionId, body, budgetMs, agent) {
+  return await sendFor(deps, sessionId, body, budgetMs, agent) !== undefined;
 }
-async function sendFor(deps, sessionId, body, budgetMs) {
+async function sendFor(deps, sessionId, body, budgetMs, agent) {
   const wake = loadState(deps.dataDir, sessionId).wake;
-  if (!wake || wake.dead)
+  const trace = traceOf(deps);
+  if (!wake || wake.dead) {
+    if (trace)
+      trace.status = "skipped:no_wake_token";
     return;
-  const { url, init } = waitingRequest(deps, wake, body);
+  }
   const fetchImpl = deps.fetch ?? ((input, i) => fetch(input, i));
-  return withDeadline(budgetMs, undefined, async (signal) => {
-    const response = await fetchImpl(url, { ...init, signal });
-    if (!response.ok)
+  const slot = agent === undefined ? {} : {
+    agent_id: agent.id,
+    ...agent.type === undefined ? {} : { agent_type: agent.type }
+  };
+  const version = body.waiting && trace?.clientVersion !== undefined ? trace.clientVersion : undefined;
+  let status = "error:timeout";
+  const post = (b) => withDeadline(budgetMs, undefined, async (signal) => {
+    const { url, init } = waitingRequest(deps, wake, b);
+    try {
+      return await fetchImpl(url, { ...init, signal });
+    } catch {
+      status = signal.aborted ? "error:timeout" : "error:network";
       return;
-    const answer = await response.json().catch(() => ({}));
-    return answer !== null && typeof answer === "object" ? answer : {};
+    }
   });
+  let response = await post({
+    ...body,
+    ...slot,
+    ...version === undefined ? {} : { client_version: version }
+  });
+  if (response?.status === 400 && (version !== undefined || agent !== undefined))
+    response = await post(body);
+  if (response !== undefined)
+    status = response.status;
+  if (trace)
+    trace.status = status;
+  if (response === undefined || !response.ok)
+    return;
+  const answer = await response.json().catch(() => ({}));
+  return answer !== null && typeof answer === "object" ? answer : {};
 }
 function decisionUrl(deps, wakeUrl2, request, nonce) {
   const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
@@ -939,6 +1219,30 @@ function answerWaitSeconds(deps) {
   const value = Number(raw);
   return Number.isFinite(value) && value >= 0 && value <= 590 ? value : ANSWER_WAIT_S;
 }
+function settingsOf(deps) {
+  return {
+    answer_wait_s: answerWaitSeconds(deps),
+    answer_wait_env_set: (deps.env.HARNESSIM_ANSWER_WAIT_S ?? "").trim() !== "",
+    grace_s: graceSeconds(deps),
+    min_answer_s: MIN_ANSWER_S
+  };
+}
+function fileFacts(file) {
+  if (file === undefined)
+    return { file: "absent" };
+  return {
+    file: "present",
+    kind: file.kind,
+    has_tool: file.tool !== undefined,
+    has_until: file.until !== undefined,
+    has_nonce: file.nonce !== undefined,
+    nonce_sha: shortHash(file.nonce),
+    told: file.told === true,
+    answers: file.answers === true,
+    source: file.source ?? "permission",
+    ...file.command === undefined ? {} : { command_len: file.command.length }
+  };
+}
 var PLANNING_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 var newNonce = () => randomBytes(24).toString("base64url");
 var where = (deps) => {
@@ -958,14 +1262,25 @@ async function permissionRequest(input, deps, sleep = realSleep) {
   const sessionId = input.session_id;
   const tool = str(input.tool_name);
   if (autoApproves(tool, deps.env, deps.home, deps.cwd)) {
+    dbg(deps, "permission_skip", {
+      reason: "auto_approved",
+      tool: safeTool(tool)
+    });
     return decisionOutput("allow_once");
   }
-  if (!sessionId || !bound(deps, sessionId))
+  if (!sessionId || !bound(deps, sessionId)) {
+    dbg(deps, "permission_skip", { reason: "unbound" });
     return "";
+  }
   if (tool !== undefined && PLANNING_TOOLS.has(tool)) {
+    dbg(deps, "planning_route", { tool: safeTool(tool) });
     return planningRequest(input, deps, sleep);
   }
-  const summary = summarize(input.tool_name, input.tool_input);
+  const base = summarize(input.tool_name, input.tool_input);
+  const agent = safeAgent(input.agent_type);
+  const ref = agentOf(input);
+  const agentId = ref?.id;
+  const summary = base !== undefined && agent !== undefined && agentId !== undefined ? clip(`${agent} subagent: ${base}`) : base;
   const budgetMs = answerWaitSeconds(deps) * 1000;
   const id = randomUUID();
   const start = deps.now?.() ?? Date.now();
@@ -978,6 +1293,8 @@ async function permissionRequest(input, deps, sleep = realSleep) {
     kind: "permission",
     ...summary === undefined ? {} : { summary },
     at: nowIso(deps),
+    ...ref === undefined ? {} : { agent: ref.id },
+    ...ref?.type === undefined ? {} : { agentType: ref.type },
     ...tool === undefined || budgetMs === 0 ? {} : {
       tool: tool.slice(0, 64),
       outside: writesOutside(input.tool_input, deps.cwd),
@@ -990,45 +1307,86 @@ async function permissionRequest(input, deps, sleep = realSleep) {
       ...where(deps),
       ...suggestion === undefined ? {} : { suggestion }
     }
+  }, agentId);
+  dbg(deps, "wait_file_written", {
+    ...fileFacts(readWaiting(deps.dataDir, sessionId, agentId)),
+    tool: safeTool(tool),
+    budget_s: budgetMs / 1000
   });
-  if (tool === undefined || budgetMs === 0)
+  if (tool === undefined || budgetMs === 0) {
+    dbg(deps, "permission_skip", {
+      reason: tool === undefined ? "no_tool_name" : "answer_wait_zero_env"
+    });
     return "";
+  }
   return awaitAnswer(deps, sessionId, id, budgetMs, sleep, (decision, file) => {
     if (decision.state === "allow_once" || decision.state === "deny" || decision.state === "allow_always") {
       return decisionOutput(decision.state, file.suggestion, decision.rule);
     }
     return "";
-  }, "");
+  }, "", true, ref === undefined ? undefined : {
+    afterMs: graceSeconds(deps) * 1000,
+    run: () => notification({
+      session_id: sessionId,
+      hook_event_name: "Notification",
+      notification_type: "permission_prompt",
+      agent_id: ref.id,
+      ...ref.type === undefined ? {} : { agent_type: ref.type }
+    }, deps, async () => {})
+  }, ref);
 }
-async function awaitAnswer(deps, sessionId, id, budgetMs, sleep, render, none, clear = true) {
+async function awaitAnswer(deps, sessionId, id, budgetMs, sleep, render, none, clear = true, tell, agent) {
   let waited = 0;
+  let tried = false;
+  const poll = (outcome, extra = {}) => dbg(deps, "poll", { outcome, waited_s: waited / 1000, ...extra });
   while (waited < budgetMs) {
-    const file = readWaiting(deps.dataDir, sessionId);
-    if (file === undefined || file.id !== id)
+    let file = readWaiting(deps.dataDir, sessionId, agent?.id);
+    if (file === undefined || file.id !== id) {
+      poll(file === undefined ? "gone_local" : "superseded");
       return none;
-    if (file.told === true && file.answers !== true)
+    }
+    if (tell !== undefined && !tried && file.told !== true && waited >= tell.afterMs) {
+      tried = true;
+      poll("tell_subagent");
+      await tell.run();
+      file = readWaiting(deps.dataDir, sessionId, agent?.id);
+      if (file === undefined || file.id !== id)
+        return none;
+    }
+    if (file.told === true && file.answers !== true) {
+      poll("told_not_answerable");
       return none;
+    }
     if (file.told !== true) {
       await sleep(LOCAL_POLL_MS);
       waited += LOCAL_POLL_MS;
       continue;
     }
-    if (file.nonce === undefined)
+    if (file.nonce === undefined) {
+      poll("no_nonce");
       return none;
+    }
     const decision = await readDecision(deps, sessionId, id, file.nonce);
-    if (decision?.state === "gone")
+    if (decision?.state === "gone") {
+      poll("gone");
       return none;
+    }
+    poll(decision === undefined ? "error" : decision.state);
     if (decision !== undefined && decision.state !== "pending") {
       if (clear)
-        await clearWaiting({ session_id: sessionId }, deps);
+        await clearWaiting({
+          session_id: sessionId,
+          ...agent === undefined ? {} : { agent_id: agent.id }
+        }, deps);
       return render(decision, file);
     }
     await sleep(DECISION_POLL_MS);
     waited += DECISION_POLL_MS;
   }
+  poll("timeout");
   return none;
 }
-async function offerPrompt(deps, sessionId, tool, fields, summary, until, sleep, render, none, clear) {
+async function offerPrompt(deps, sessionId, tool, fields, summary, until, sleep, render, none, clear, agent) {
   const id = randomUUID();
   const now = deps.now?.() ?? Date.now();
   const file = {
@@ -1040,22 +1398,24 @@ async function offerPrompt(deps, sessionId, tool, fields, summary, until, sleep,
     outside: false,
     until,
     nonce: newNonce(),
+    ...agent === undefined ? {} : { agent: agent.id },
+    ...agent?.type === undefined ? {} : { agentType: agent.type },
     ...fields,
     ...where(deps)
   };
-  writeWaiting(deps.dataDir, sessionId, file);
+  writeWaiting(deps.dataDir, sessionId, file, agent?.id);
   const request = requestOf(file, now, 1);
   if (request === undefined)
     return none;
-  const answer = await sendFor(deps, sessionId, { waiting: true, kind: "permission", summary, request }, NOTICE_BUDGET_MS);
-  const stored = readWaiting(deps.dataDir, sessionId);
+  const answer = await sendFor(deps, sessionId, { waiting: true, kind: "permission", summary, request }, NOTICE_BUDGET_MS, agent);
+  const stored = readWaiting(deps.dataDir, sessionId, agent?.id);
   if (answer === undefined) {
     if (stored?.id === id)
-      rmSync2(waitingPath(deps.dataDir, sessionId), { force: true });
+      rmSync2(waitingPath(deps.dataDir, sessionId, agent?.id), { force: true });
     return none;
   }
   if (stored === undefined) {
-    await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS);
+    await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS, agent);
     return none;
   }
   if (stored.id !== id)
@@ -1064,11 +1424,11 @@ async function offerPrompt(deps, sessionId, tool, fields, summary, until, sleep,
     ...stored,
     told: true,
     ...answer.answers === true ? { answers: true } : {}
-  });
+  }, agent?.id);
   if (answer.answers !== true)
     return none;
   const left = until - (deps.now?.() ?? Date.now());
-  return awaitAnswer(deps, sessionId, id, left, sleep, (decision) => render(decision), none, clear);
+  return awaitAnswer(deps, sessionId, id, left, sleep, (decision) => render(decision), none, clear, undefined, agent);
 }
 async function planningRequest(input, deps, sleep = realSleep) {
   const sessionId = input.session_id;
@@ -1087,7 +1447,7 @@ async function planningRequest(input, deps, sleep = realSleep) {
     if (plan === undefined)
       return "";
     const shown = clip(redact(plan), 8000);
-    return offerPrompt(deps, sessionId, tool, { source: "plan", plan: shown }, clip(`${tool}: ${shown}`, SUMMARY_MAX2), until, sleep, (decision) => planOutput(input.tool_input, decision.choices, decision.comment), "", true);
+    return offerPrompt(deps, sessionId, tool, { source: "plan", plan: shown }, clip(`${tool}: ${shown}`, SUMMARY_MAX2), until, sleep, (decision) => planOutput(input.tool_input, decision.choices, decision.comment), "", true, agentOf(input));
   }
   const asked = askedQuestions(input.tool_input);
   if (asked === undefined)
@@ -1110,7 +1470,7 @@ async function planningRequest(input, deps, sleep = realSleep) {
       question,
       options: [...sentOf.keys()],
       ...q.multiSelect ? { multi: true } : {}
-    }, clip(`${tool}${place}: ${question}`, SUMMARY_MAX2), until, sleep, (decision) => askAnswers(q, (label) => sentOf.get(label), decision.choices, decision.comment), undefined, i === prepared.length - 1);
+    }, clip(`${tool}${place}: ${question}`, SUMMARY_MAX2), until, sleep, (decision) => askAnswers(q, (label) => sentOf.get(label), decision.choices, decision.comment), undefined, i === prepared.length - 1, agentOf(input));
     if (one === undefined)
       return "";
     Object.assign(answers, one);
@@ -1129,99 +1489,247 @@ async function notification(input, deps, sleep = realSleep) {
   if (!bound(deps, sessionId))
     return "";
   const kind = type === "permission_prompt" ? "permission" : "idle";
-  let file = readWaiting(deps.dataDir, sessionId);
-  if (file?.told && (file.kind === kind || kind === "idle"))
+  const ref = agentOf(input);
+  const agentId = ref?.id;
+  let file = readWaiting(deps.dataDir, sessionId, agentId);
+  dbg(deps, "notification_file", { ...fileFacts(file), kind });
+  if (file?.told && (file.kind === kind || kind === "idle")) {
+    dbg(deps, "notice_skip", { reason: "already_told" });
     return "";
+  }
   if (file === undefined || file.kind !== kind) {
+    dbg(deps, "bare_file", {
+      reason: file === undefined ? "no_file" : "kind_differs"
+    });
     file = {
       id: randomUUID(),
       kind,
       at: nowIso(deps),
-      ...file?.summary && kind === "permission" ? { summary: file.summary } : {}
+      ...file?.summary && kind === "permission" ? { summary: file.summary } : {},
+      ...ref === undefined ? {} : { agent: ref.id },
+      ...ref?.type === undefined ? {} : { agentType: ref.type }
     };
-    writeWaiting(deps.dataDir, sessionId, file);
+    writeWaiting(deps.dataDir, sessionId, file, agentId);
   }
   const id = file.id;
-  if (kind === "permission")
-    await sleep(graceSeconds(deps) * 1000);
-  const still = readWaiting(deps.dataDir, sessionId);
-  if (still === undefined || still.id !== id || still.told)
+  if (kind === "permission") {
+    const grace = graceSeconds(deps);
+    const nowS = (deps.now?.() ?? Date.now()) / 1000;
+    const left = file.until === undefined ? undefined : Math.floor(file.until / 1000 - nowS);
+    const used = left === undefined ? grace : Math.min(grace, Math.max(0, left - MIN_ANSWER_S));
+    dbg(deps, "grace", { grace_s: grace, grace_used_s: used, left_s: left });
+    await sleep(used * 1000);
+  }
+  const still = readWaiting(deps.dataDir, sessionId, agentId);
+  if (still === undefined || still.id !== id || still.told) {
+    dbg(deps, "notice_skip", {
+      reason: still === undefined ? "cleared_during_grace" : still.told ? "told_during_grace" : "superseded"
+    });
     return "";
-  const request = requestOf(still, deps.now?.() ?? Date.now());
+  }
+  const nowMs = deps.now?.() ?? Date.now();
+  const verdict = requestVerdict(still, nowMs);
+  const request = "request" in verdict ? verdict.request : undefined;
+  if ("reason" in verdict) {
+    dbg(deps, "request_unavailable", {
+      reason: verdict.reason === "no_tool" && answerWaitSeconds(deps) === 0 ? "answer_wait_zero_env" : verdict.reason,
+      ...fileFacts(still),
+      left_s: still.until === undefined ? undefined : Math.floor((still.until - nowMs) / 1000)
+    });
+  } else {
+    dbg(deps, "request_built", {
+      left_s: verdict.request.answer_s,
+      tool: safeTool(verdict.request.tool)
+    });
+  }
   const answer = await sendFor(deps, sessionId, {
     waiting: true,
     kind,
     ...still.summary === undefined ? {} : { summary: still.summary },
     ...request === undefined ? {} : { request }
-  }, NOTICE_BUDGET_MS);
+  }, NOTICE_BUDGET_MS, ref);
+  dbg(deps, "notice_sent", {
+    request_sent: request !== undefined,
+    outcome: answer === undefined ? "not_taken" : "taken",
+    answers: answer?.answers === true,
+    status: String(traceOf(deps)?.status ?? "").replace(/[^A-Za-z0-9_.:~-]/g, "_")
+  });
   if (answer === undefined)
     return "";
-  const now = readWaiting(deps.dataDir, sessionId);
+  const now = readWaiting(deps.dataDir, sessionId, agentId);
   if (now?.id === id)
     writeWaiting(deps.dataDir, sessionId, {
       ...now,
       told: true,
       ...request !== undefined && answer.answers === true ? { answers: true } : {}
-    });
+    }, agentId);
   else if (now === undefined)
-    await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS);
+    await send(deps, sessionId, { waiting: false }, CLEAR_BUDGET_MS, ref);
   return "";
 }
 function requestOf(file, nowMs, minLeft = MIN_ANSWER_S) {
-  if (file.kind !== "permission" || file.tool === undefined || file.until === undefined || file.nonce === undefined) {
-    return;
-  }
+  const verdict = requestVerdict(file, nowMs, minLeft);
+  return "request" in verdict ? verdict.request : undefined;
+}
+function requestVerdict(file, nowMs, minLeft = MIN_ANSWER_S) {
+  if (file.kind !== "permission")
+    return { reason: "not_permission_kind" };
+  if (file.tool === undefined)
+    return { reason: "no_tool" };
+  if (file.until === undefined)
+    return { reason: "no_until" };
+  if (file.nonce === undefined)
+    return { reason: "no_nonce" };
   const left = Math.floor((file.until - nowMs) / 1000);
+  if (left <= 0)
+    return { reason: "deadline_passed" };
   if (left < minLeft)
-    return;
+    return { reason: "under_min_answer_s" };
   return {
-    id: file.id,
-    nonce: file.nonce,
-    tool: file.tool,
-    outside: file.outside === true,
-    answer_s: Math.min(left, 600),
-    source: file.source ?? "permission",
-    ...file.command === undefined ? {} : { command: file.command },
-    ...file.url === undefined ? {} : { url: file.url },
-    ...file.plan === undefined ? {} : { plan: file.plan },
-    ...file.question === undefined ? {} : { question: file.question },
-    ...file.options === undefined ? {} : { options: file.options },
-    ...file.multi === true ? { multi: true } : {},
-    ...file.suggestion === undefined ? {} : { suggestion: file.suggestion },
-    ...file.call === undefined ? {} : { call: file.call },
-    ...file.host === undefined ? {} : { host: file.host },
-    ...file.project === undefined ? {} : { project: file.project }
+    request: {
+      id: file.id,
+      nonce: file.nonce,
+      tool: file.tool,
+      outside: file.outside === true,
+      answer_s: Math.min(left, 600),
+      source: file.source ?? "permission",
+      ...file.command === undefined ? {} : { command: file.command },
+      ...file.url === undefined ? {} : { url: file.url },
+      ...file.plan === undefined ? {} : { plan: file.plan },
+      ...file.question === undefined ? {} : { question: file.question },
+      ...file.options === undefined ? {} : { options: file.options },
+      ...file.multi === true ? { multi: true } : {},
+      ...file.suggestion === undefined ? {} : { suggestion: file.suggestion },
+      ...file.call === undefined ? {} : { call: file.call },
+      ...file.host === undefined ? {} : { host: file.host },
+      ...file.project === undefined ? {} : { project: file.project }
+    }
   };
 }
 async function clearWaiting(input, deps) {
   const sessionId = input.session_id;
   if (!sessionId)
     return "";
-  const path = waitingPath(deps.dataDir, sessionId);
-  if (!existsSync4(path))
+  const event = input.hook_event_name;
+  const agentId = safeAgent(input.agent_id);
+  const slots = event === "UserPromptSubmit" ? slotsOf(deps.dataDir, sessionId) : event === "SubagentStop" && agentId === undefined ? [] : [agentId];
+  const open2 = slots.filter((agent) => existsSync4(waitingPath(deps.dataDir, sessionId, agent)));
+  if (open2.length === 0)
     return "";
-  const file = readWaiting(deps.dataDir, sessionId);
-  if (file?.tool !== undefined && (input.hook_event_name === "PostToolUse" || input.hook_event_name === "PostToolUseFailure")) {
+  dbg(deps, "clear", {
+    event,
+    session: sessionId.slice(0, 64),
+    tool: safeTool(input.tool_name),
+    agent: agentId === undefined ? "main" : "subagent",
+    outcome: `open_${open2.length}`
+  });
+  const first = readWaiting(deps.dataDir, sessionId, open2[0]);
+  const live = traceOf(deps);
+  const own = (live === undefined || live.logged === true) && event !== undefined ? {
+    event,
+    session: sessionId.slice(0, 64),
+    ...safeTool(input.tool_name) === undefined ? {} : { tool: safeTool(input.tool_name) },
+    ...agentId === undefined ? {} : { agentId },
+    ...safeAgent(input.agent_type) === undefined ? {} : { agentType: safeAgent(input.agent_type) },
+    hadRequest: first?.tool !== undefined,
+    bound: true,
+    status: "cleared:not_told"
+  } : undefined;
+  if (own !== undefined)
+    startTrace(deps, own);
+  try {
+    for (const agent of open2)
+      await clearOpenWait(input, deps, sessionId, agent);
+    return "";
+  } finally {
+    if (own !== undefined)
+      finishTrace(deps, own, "");
+  }
+}
+async function clearOpenWait(input, deps, sessionId, agent) {
+  const event = input.hook_event_name;
+  const path = waitingPath(deps.dataDir, sessionId, agent);
+  const file = readWaiting(deps.dataDir, sessionId, agent);
+  if (file?.tool !== undefined && (event === "PostToolUse" || event === "PostToolUseFailure")) {
     const finished = str(input.tool_name);
     const sameTool = finished === file.tool;
     const sameCall = file.call === undefined || callHash(input.tool_input) === file.call;
-    if (finished !== undefined && (!sameTool || !sameCall))
-      return "";
+    if (finished !== undefined && (!sameTool || !sameCall)) {
+      const trace = traceOf(deps);
+      if (trace)
+        trace.status = "skipped:other_call";
+      dbg(deps, "clear_skip", {
+        reason: "other_call",
+        tool: safeTool(finished)
+      });
+      return;
+    }
   }
   try {
     rmSync2(path, { force: true });
   } catch {
-    return "";
+    return;
   }
   if (file?.told) {
     const tool = str(input.tool_name);
     const same = file.call !== undefined && tool === file.tool && callHash(input.tool_input) === file.call;
-    const ran = input.hook_event_name === "PostToolUse" && tool !== undefined && same ? { ran: { tool, call: file.call } } : {};
-    await send(deps, sessionId, { waiting: false, ...ran }, CLEAR_BUDGET_MS);
+    const ran = event === "PostToolUse" && tool !== undefined && same ? { ran: { tool, call: file.call } } : {};
+    const ref = file.agent === undefined ? undefined : file.agentType === undefined ? { id: file.agent } : { id: file.agent, type: file.agentType };
+    await send(deps, sessionId, { waiting: false, ...ran }, CLEAR_BUDGET_MS, ref);
   }
-  return "";
 }
 async function waitingHook(input, deps, sleep = realSleep) {
+  const event = input.hook_event_name;
+  if (event !== "PermissionRequest" && event !== "Notification")
+    return dispatch(input, deps, sleep);
+  const session = str(input.session_id) ?? "";
+  let isBound = false;
+  let hadRequest = event === "PermissionRequest";
+  try {
+    isBound = session !== "" && bound(deps, session);
+    if (!hadRequest && session !== "")
+      hadRequest = readWaiting(deps.dataDir, session, safeAgent(input.agent_id))?.tool !== undefined;
+  } catch {}
+  const tool = safeTool(input.tool_name);
+  const agentId = safeAgent(input.agent_id);
+  const agentType = safeAgent(input.agent_type);
+  const clientVersion = clientVersionOf(input.transcript_path);
+  const trace = {
+    event,
+    session: session.slice(0, 64),
+    ...tool === undefined ? {} : { tool },
+    ...agentId === undefined ? {} : { agentId },
+    ...agentType === undefined ? {} : { agentType },
+    hadRequest,
+    bound: isBound,
+    status: isBound ? "skipped:no_post" : "skipped:unbound",
+    ...clientVersion === undefined ? {} : { clientVersion }
+  };
+  startTrace(deps, trace);
+  dbg(deps, "hook", {
+    event,
+    session: session.slice(0, 64),
+    agent: agentId === undefined ? "main" : "subagent",
+    bound: isBound,
+    tool,
+    kind: str(input.notification_type),
+    ...settingsOf(deps)
+  });
+  let output = "";
+  try {
+    output = await dispatch(input, deps, sleep);
+    return output;
+  } finally {
+    dbg(deps, "hook_end", {
+      event,
+      session: session.slice(0, 64),
+      status: String(trace.status).replace(/[^A-Za-z0-9_.:~-]/g, "_"),
+      decision: output === "" ? "none" : "output"
+    });
+    finishTrace(deps, trace, output);
+  }
+}
+async function dispatch(input, deps, sleep) {
   switch (input.hook_event_name) {
     case "PermissionRequest":
       return permissionRequest(input, deps, sleep);
@@ -1233,6 +1741,7 @@ async function waitingHook(input, deps, sleep = realSleep) {
     case "PostToolUseFailure":
     case "UserPromptSubmit":
     case "Stop":
+    case "SubagentStop":
       return clearWaiting(input, deps);
     default:
       return "";
@@ -1241,15 +1750,15 @@ async function waitingHook(input, deps, sleep = realSleep) {
 
 import { homedir } from "node:os";
 
-import { join as join5 } from "node:path";
-import { mkdirSync as mkdirSync3 } from "node:fs";
+import { join as join7 } from "node:path";
+import { mkdirSync as mkdirSync5 } from "node:fs";
 var HEARTBEAT_MS = 1e4;
 var HEARTBEAT_STALE_MS = 35000;
 function heartbeatPath(dataDir, sessionId) {
-  return join5(sessionDir(dataDir, sessionId), "channel.json");
+  return join7(sessionDir(dataDir, sessionId), "channel.json");
 }
 function writeHeartbeat(dataDir, sessionId, beat) {
-  mkdirSync3(sessionDir(dataDir, sessionId), { recursive: true });
+  mkdirSync5(sessionDir(dataDir, sessionId), { recursive: true });
   writeJsonAtomic(heartbeatPath(dataDir, sessionId), beat);
 }
 function channelActive(dataDir, sessionId, now, alive, read = (p) => readJson(p)) {
@@ -1384,8 +1893,15 @@ async function runHook(fn) {
   process.exit(0);
 }
 
-process.on("SIGTERM", () => process.exit(0));
+process.on("SIGTERM", () => {
+  flushWaitingLog();
+  process.exit(0);
+});
 await runHook(async () => {
+  if (process.argv[2] === "debug") {
+    const n = Number(process.argv[3]);
+    return debugReport(depsFromProcess().dataDir, Number.isInteger(n) && n > 0 ? n : 50).trimEnd();
+  }
   const input = parseJson(await readStdin()) ?? {};
   return waitingHook(input, depsFromProcess([], input.cwd));
 });
