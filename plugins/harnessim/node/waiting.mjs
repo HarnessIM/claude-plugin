@@ -469,7 +469,7 @@ function resolveDataDir(env, argv, home) {
 
 var PLUGIN_NAME = "harnessim";
 var CHANNEL_SERVER = "im-live";
-var VERSION = "0.16.3";
+var VERSION = "0.16.4";
 var PLUGIN_HEADER = "X-HarnessIM-Plugin";
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 function loadDepsConfig(deps) {
@@ -1001,6 +1001,24 @@ function callHash(toolInput) {
   const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, inner]) => [key, canonical(inner)])) : value;
   return createHash2("sha256").update(JSON.stringify(canonical(toolInput) ?? null)).digest("hex").slice(0, 16);
 }
+var NOT_TYPED_PREFIXES = [
+  "<task-notification>",
+  "<cross-session-message",
+  "<agent-message",
+  "Another Claude session sent a message"
+];
+function isTypedPrompt(input) {
+  const origin = input.origin;
+  if (origin !== null && typeof origin === "object") {
+    const kind = origin.kind;
+    if (typeof kind === "string")
+      return kind === "human";
+  }
+  if (typeof input.prompt !== "string")
+    return true;
+  const text = input.prompt.trimStart();
+  return !NOT_TYPED_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
 var waitingDir = (dataDir) => join6(dataDir, "waiting");
 var waitingPath = (dataDir, sessionId, agent) => join6(waitingDir(dataDir), agent === undefined ? `${sanitizeId(sessionId)}.json` : `${sanitizeId(sessionId)}~${sanitizeId(agent)}.json`);
 function agentOf(input) {
@@ -1055,27 +1073,6 @@ function readWaiting(dataDir, sessionId, agent) {
 function writeWaiting(dataDir, sessionId, file, agent) {
   mkdirSync4(waitingDir(dataDir), { recursive: true, mode: 448 });
   writeJsonAtomic(waitingPath(dataDir, sessionId, agent), file);
-}
-function slotsOf(dataDir, sessionId) {
-  const main = `${sanitizeId(sessionId)}.json`;
-  const prefix = `${sanitizeId(sessionId)}~`;
-  let names;
-  try {
-    names = readdirSync2(waitingDir(dataDir));
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const name of names) {
-    if (name === main)
-      out.push(undefined);
-    else if (name.startsWith(prefix) && name.endsWith(".json")) {
-      const agent = readJson(join6(waitingDir(dataDir), name))?.agent;
-      if (agent !== undefined)
-        out.push(agent);
-    }
-  }
-  return out;
 }
 function waitingUrl(deps, wakeUrl2) {
   const base = wakeUrl2 ?? `${loadDepsConfig(deps).baseUrl}/wake`;
@@ -1338,20 +1335,37 @@ async function permissionRequest(input, deps, sleep = realSleep) {
 async function awaitAnswer(deps, sessionId, id, budgetMs, sleep, render, none, clear = true, tell, agent) {
   let waited = 0;
   let tried = false;
+  let seen;
   const poll = (outcome, extra = {}) => dbg(deps, "poll", { outcome, waited_s: waited / 1000, ...extra });
+  const goneLocal = async () => {
+    poll("gone_local");
+    if (seen === undefined || seen.told !== true || seen.answers !== true || seen.nonce === undefined)
+      return none;
+    const decision = await readDecision(deps, sessionId, id, seen.nonce);
+    poll(decision === undefined ? "gone_local_error" : `gone_local_${decision.state}`);
+    if (decision === undefined || decision.state === "pending" || decision.state === "gone")
+      return none;
+    return render(decision, seen);
+  };
   while (waited < budgetMs) {
     let file = readWaiting(deps.dataDir, sessionId, agent?.id);
-    if (file === undefined || file.id !== id) {
-      poll(file === undefined ? "gone_local" : "superseded");
+    if (file === undefined)
+      return goneLocal();
+    if (file.id !== id) {
+      poll("superseded");
       return none;
     }
+    seen = file;
     if (tell !== undefined && !tried && file.told !== true && waited >= tell.afterMs) {
       tried = true;
       poll("tell_subagent");
       await tell.run();
       file = readWaiting(deps.dataDir, sessionId, agent?.id);
-      if (file === undefined || file.id !== id)
+      if (file === undefined)
+        return goneLocal();
+      if (file.id !== id)
         return none;
+      seen = file;
     }
     if (file.told === true && file.answers !== true) {
       poll("told_not_answerable");
@@ -1612,7 +1626,7 @@ async function clearWaiting(input, deps) {
     return "";
   const event = input.hook_event_name;
   const agentId = safeAgent(input.agent_id);
-  const slots = event === "UserPromptSubmit" ? slotsOf(deps.dataDir, sessionId) : event === "SubagentStop" && agentId === undefined ? [] : [agentId];
+  const slots = event === "UserPromptSubmit" ? isTypedPrompt(input) ? [undefined] : [] : event === "SubagentStop" && agentId === undefined ? [] : [agentId];
   const open2 = slots.filter((agent) => existsSync4(waitingPath(deps.dataDir, sessionId, agent)));
   if (open2.length === 0)
     return "";

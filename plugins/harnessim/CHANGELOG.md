@@ -6,6 +6,27 @@ equal) and adds an entry here, newest first. Claude Code only updates an
 installed plugin when that version changes. `bun scripts/plugin-version.ts`
 at the repository root checks both; see README → Releasing.
 
+## 0.16.4
+
+- **A subagent's permission prompt no longer dies when a background task
+  reports back.** Claude Code fires `UserPromptSubmit` for a task
+  notification and for a message another session sends, not only for a
+  prompt you type, and that hook ended every wait of the session. A
+  subagent's prompt then showed at HarnessIM as answered in the terminal
+  ("This prompt can only be answered in the terminal") though nobody had.
+  `UserPromptSubmit` now ends only the main session's wait, and only for a
+  prompt you typed (the input's `origin.kind` when Claude Code sends one,
+  otherwise the prompt's opening: `<task-notification>`,
+  `<cross-session-message`, `<agent-message`, "Another Claude session sent
+  a message"). A subagent's wait ends by its own `PostToolUse`,
+  `PostToolUseFailure` or `SubagentStop`, or at its deadline.
+- **A waiting hook whose wait file went reads the answer once.** If the
+  file is removed while HarnessIM holds the request, the hook reads
+  `GET /wake/decision` once and returns the person's answer when there is
+  one; pending, gone, an error, or a request HarnessIM never kept still
+  leaves the terminal to decide. Nothing is allowed without a decision a
+  person made at HarnessIM.
+
 ## 0.16.3
 
 - **A permission prompt's notice keeps its request.** The notice that tells
